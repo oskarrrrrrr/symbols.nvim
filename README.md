@@ -45,18 +45,23 @@ https://github.com/user-attachments/assets/a63dd071-882c-4a9c-ac3e-3abe775ef7db
 Using lazy.nvim:
 
 ```lua
-{
+  {
     "oskarrrrrrr/symbols.nvim",
+    keys = {
+      { ",ss", ":Symbols<CR>" },
+      {
+        ",sc", ":SymbolsClose<CR>"
+      },
+
+      {
+        ",st", ":SymbolsToggle<CR>"
+      },
+    },
     config = function()
-        local r = require("symbols.recipes")
-        require("symbols").setup(r.DefaultFilters, r.AsciiSymbols, {
-            -- custom settings here
-            -- e.g. hide_cursor = false
-        })
-        vim.keymap.set("n", ",s", ":Symbols<CR>")
-        vim.keymap.set("n", ",S", ":SymbolsClose<CR>")
-    end
-}
+      local r = require("symbols.recipes")
+      require("symbols").setup(r.DefaultFilters, r.AsciiSymbols, {})
+    end,
+  },
 ```
 
 # Tips
