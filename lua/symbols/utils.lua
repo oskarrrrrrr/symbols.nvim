@@ -59,5 +59,4 @@ function utils.assert_keys_are_enum(tbl, enum, table_name)
     end
 end
 
-
 return utils

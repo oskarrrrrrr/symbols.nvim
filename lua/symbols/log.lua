@@ -43,10 +43,10 @@ local function _log(msg, level)
 end
 
 function M.error(msg) _log(msg or "", vim.log.levels.ERROR) end
-function M.warn(msg) _log(msg or "", vim.log.levels.WARN) end
-function M.info (msg) _log(msg or "", vim.log.levels.INFO) end
-function M.debug (msg) _log(msg or "", vim.log.levels.DEBUG) end
-function M.trace (msg) _log(msg or "", vim.log.levels.TRACE) end
+function M.warn(msg)  _log(msg or "", vim.log.levels.WARN)  end
+function M.info(msg)  _log(msg or "", vim.log.levels.INFO)  end
+function M.debug(msg) _log(msg or "", vim.log.levels.DEBUG) end
+function M.trace(msg) _log(msg or "", vim.log.levels.TRACE) end
 
 ---@param name string
 ---@param desc string
@@ -78,6 +78,24 @@ function M.create_change_log_level_user_command(name, desc, create_user_command)
             desc = desc
         }
     )
+end
+
+function M.time(f, fname)
+    return function(...)
+        local start = os.clock()
+        local result = f(...)
+        local end_ = os.clock()
+        local debug_info = debug.getinfo(f, "nS")
+        local msg = string.format(
+            "Function %s at %s:%d took %0.fms",
+            fname or "<unknown>",
+            (debug_info.source or "@<unknown>"):sub(2),
+            debug_info.linedefined,
+            (end_ - start) * 1000
+        )
+        M.debug(msg)
+        return result
+    end
 end
 
 return M

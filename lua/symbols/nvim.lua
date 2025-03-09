@@ -1,15 +1,29 @@
 local nvim = {}
 
 ---@param buf integer
+---@param opt string
+---@return any
+function nvim.buf_get_option(buf, opt)
+    return vim.api.nvim_get_option_value(opt, { buf = buf })
+end
+
+---@param buf integer
+---@param opt string
+---@param value any
+function nvim.buf_set_option(buf, opt, value)
+    vim.api.nvim_set_option_value(opt, value, { buf = buf })
+end
+
+---@param buf integer
 ---@return boolean
 function nvim.buf_get_modifiable(buf)
-    return vim.api.nvim_get_option_value("modifiable", { buf = buf })
+    return nvim.buf_get_option(buf, "modifiable")
 end
 
 ---@param buf integer
 ---@param value boolean
 function nvim.buf_set_modifiable(buf, value)
-    vim.api.nvim_set_option_value("modifiable", value, { buf = buf })
+    nvim.buf_set_option(buf, "modifiable", value)
 end
 
 ---@param buf integer
@@ -19,6 +33,20 @@ function nvim.buf_set_content(buf, lines)
     if not modifiable then nvim.buf_set_modifiable(buf, true) end
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
     if not modifiable then nvim.buf_set_modifiable(buf, false) end
+end
+
+---@param buf integer
+---@param start integer
+---@param count integer
+function nvim.buf_remove_lines(buf, start, count)
+    vim.api.nvim_buf_set_lines(buf, start, start+count, true, {})
+end
+
+---@param buf integer
+---@param start integer
+---@param lines string[]
+function nvim.buf_set_lines(buf, start, lines)
+    vim.api.nvim_buf_set_lines(buf, start, start+(#lines)-1, true, lines)
 end
 
 ---@param win integer
