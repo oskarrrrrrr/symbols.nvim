@@ -77,4 +77,9 @@ function prof.Timer:elapsed_ms()
     return (self.end_ - self.start_) * 1000
 end
 
+---@return number
+function prof.Timer:elapsed_us()
+    return (self.end_ - self.start_) * 1000000
+end
+
 return prof

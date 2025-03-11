@@ -36,6 +36,11 @@ function nvim.buf_set_content(buf, lines)
 end
 
 ---@param buf integer
+function nvim.buf_clear_content(buf)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
+end
+
+---@param buf integer
 ---@param start integer
 ---@param count integer
 function nvim.buf_remove_lines(buf, start, count)
@@ -54,6 +59,14 @@ end
 ---@param value any
 function nvim.win_set_option(win, name, value)
     vim.api.nvim_set_option_value(name, value, { win = win })
+end
+
+---@param win integer
+---@return string[]
+function nvim.win_get_visible_lines(win)
+    local top_line, bottom_line = vim.fn.line("w0", win), vim.fn.line("w$", win)
+    local buf = vim.api.nvim_win_get_buf(win)
+    return vim.api.nvim_buf_get_lines(buf, top_line-1, bottom_line, true)
 end
 
 ---@class Highlight
@@ -76,10 +89,7 @@ local SIDEBAR_HL_NS = vim.api.nvim_create_namespace("SymbolsSidebarHl")
 ---@param buf integer
 function Highlight:apply(buf)
     vim.api.nvim_buf_add_highlight(
-        buf,
-        SIDEBAR_HL_NS,
-        self.group,
-        self.line-1, self.col_start, self.col_end
+        buf, SIDEBAR_HL_NS, self.group, self.line-1, self.col_start, self.col_end
     )
 end
 
