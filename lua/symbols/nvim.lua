@@ -48,7 +48,7 @@ function nvim.buf_remove_lines(buf, start, count)
 end
 
 ---@param buf integer
----@param start integer
+---@param start integer zero-indexed
 ---@param lines string[]
 function nvim.buf_set_lines(buf, start, lines)
     vim.api.nvim_buf_set_lines(buf, start, start+(#lines)-1, true, lines)

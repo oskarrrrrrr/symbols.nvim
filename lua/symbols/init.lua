@@ -74,6 +74,14 @@ end
 
 local SIDEBAR_EXT_NS = vim.api.nvim_create_namespace("SymbolsSidebarExt")
 
+---@param buf integer
+---@param highlights Highlight[]
+local function buf_add_highlights(buf, highlights)
+    for _, hl in ipairs(highlights) do
+        hl:apply(buf)
+    end
+end
+
 ---@alias RefreshSymbolsFun fun(symbols: Symbol, provider_name: string, provider_config: table)
 ---@alias KindToHlGroupFun fun(kind: string): string
 ---@alias KindToDisplayFun fun(kind: string): string
@@ -321,10 +329,7 @@ function DetailsWin:open()
     end
 
     nvim.buf_set_content(details_buf, text)
-
-    for _, highlight in ipairs(highlights) do
-        highlight:apply(details_buf)
-    end
+    buf_add_highlights(details_buf, highlights)
 
     local line_count = vim.api.nvim_buf_line_count(details_buf)
 
@@ -1562,7 +1567,8 @@ end
 ---@field highlights_config table
 ---@field chars CharConfig
 ---@field show_guide_lines boolean
----@field using_folds boolean
+---@field show_inline_details boolean
+---@field using_folds boolean Whether there are any symbols with visible children.
 
 local DisplayContext = {}
 DisplayContext.__index = DisplayContext
@@ -1591,12 +1597,13 @@ function DisplayContext:new(sidebar)
         highlights_config = cfg.get_config_by_filetype(symbols.provider_config.highlights, ft),
         chars = sidebar.char_config,
         show_guide_lines = sidebar.show_guide_lines,
+        show_inline_details = sidebar.show_inline_details,
         using_folds = any_top_level_symbol_has_visible_children(symbols),
     }, self)
 end
 
 ---@class DisplayResult
----@field line_nr integer -- starting line number in a buffer, zero-based
+---@field line_nr integer -- starting line number in a buffer, zero-indexed
 ---@field lines string[]
 ---@field highlights Highlight[]
 ---@field inline_details string[]
@@ -1621,42 +1628,41 @@ end
 
 ---@param ctx DisplayContext
 ---@param symbol Symbol
----@return string
-local function get_prefix(ctx, symbol)
-    if symbol.level == 0 then return "" end
-    local prefix = {}
+---@param recurse boolean
+---@return string[]
+local function get_inline_details(ctx, symbol, recurse)
+    if not ctx.show_inline_details then return {} end
 
-    local curr = symbol
-    local state = ctx.symbols.states[curr]
-    if state.visible_children > 0 then
-        prefix[curr.level] = ((state.folded and ctx.chars.folded) or ctx.chars.unfolded) .. " "
-    elseif ctx.show_guide_lines then
-        prefix[curr.level] = (
-            (symbol_is_last_child(symbol) and ctx.chars.guide_last_item)
-            or ctx.chars.guide_middle_item
-        ) .. " "
+    local result = {}
+    local details_fun = (
+        ctx.symbols.provider_config.details[ctx.ft]
+        or function(symbol, _) return symbol.detail end
+    )
+
+    ---@param symbol Symbol
+    local function rec(symbol)
+        local state = ctx.symbols.states[symbol]
+        if not state.visible then return end
+
+        local details = details_fun(symbol, { symbol_states = ctx.symbols.states })
+        table.insert(result, details)
+
+        if recurse and not state.folded then
+            for _, child in ipairs(symbol.children) do rec(child) end
+        end
+    end
+
+    if symbol.level == 0 then
+        for _,child in ipairs(symbol.children) do rec(child) end
     else
-        prefix[curr.level] = "  "
-    end
-    curr = curr.parent
-
-    while curr ~= nil and curr.level > 1 do
-        prefix[curr.level] = (
-            (ctx.show_guide_lines and (symbol_is_last_child(curr) and "  ") or ctx.chars.guide_vert .. " ")
-            or "  "
-        )
-        curr = curr.parent
+        rec(symbol)
     end
 
-    if curr ~= nil and curr.level > 0 then
-        prefix[curr.level] = (any_top_level_symbol_has_visible_children(ctx.symbols) and "  ") or " "
-    end
-
-    return table.concat(prefix)
+    return result
 end
 
 ---@param ctx DisplayContext
----@param line_nr integer
+---@param line_nr integer one-indexed
 ---@param symbol Symbol
 ---@param recurse boolean
 ---@return DisplayResult
@@ -1677,15 +1683,29 @@ local function get_display_lines(ctx, line_nr, symbol, recurse)
         line_len = line_len - #table.remove(line_tbl)
     end
 
+    result.inline_details = get_inline_details(ctx, symbol, recurse)
+
     if symbol.level > 1 then
-        line_add((any_top_level_symbol_has_visible_children(ctx.symbols) and "  ") or " ")
-        for _=1,symbol.level-2 do line_add("  ") end
+        line_add(ctx.using_folds and "  " or " ")
+        if ctx.show_guide_lines then
+            local temp_line = {}
+            local curr = symbol.parent
+            while curr ~= nil and curr.level > 1 do
+                table.insert(temp_line, symbol_is_last_child(curr) and "  " or ctx.chars.guide_vert .. " ")
+                curr = curr.parent
+            end
+            -- reverse the parts on insertion since we find them on the way up
+            for i=#temp_line,1,-1 do line_add(temp_line[i]) end
+        else
+            for _=1,symbol.level-2 do line_add("  ") end
+        end
     end
 
     ---@param symbol Symbol
     local function rec(symbol)
-        local line_tbl_len_original = #line_tbl
         local state = ctx.symbols.states[symbol]
+        if not state.visible then return end
+        local line_tbl_len_original = #line_tbl
 
         if state.visible_children > 0 then
             if ctx.show_guide_lines then
@@ -1693,10 +1713,9 @@ local function get_display_lines(ctx, line_nr, symbol, recurse)
                 table.insert(result.highlights, hl)
             end
             line_add(((state.folded and ctx.chars.folded) or ctx.chars.unfolded) .. " ")
-        elseif ctx.show_guide_lines then
+        elseif ctx.show_guide_lines and symbol.level > 1 then
             line_add(
-                (symbol_is_last_child(symbol) and ctx.chars.guide_last_item)
-                or ctx.chars.guide_middle_item
+                ((symbol_is_last_child(symbol) and ctx.chars.guide_last_item) or ctx.chars.guide_middle_item) .. " "
             )
             local hl = nvim.Highlight:new({ group = ctx.chars.hl, line = line_nr + #result.lines, col_start = 1, col_end = line_len })
             table.insert(result.highlights, hl)
@@ -1729,7 +1748,7 @@ local function get_display_lines(ctx, line_nr, symbol, recurse)
         if not recurse then return end
         if state.folded then return end
 
-        if ctx.show_guide_lines then
+        if ctx.show_guide_lines and symbol.level > 1 then
              line_add(symbol_is_last_child(symbol) and "  " or ctx.chars.guide_vert .. " ")
         else
             line_add("  ")
@@ -1749,94 +1768,6 @@ local function get_display_lines(ctx, line_nr, symbol, recurse)
     return result
 end
 get_display_lines = prof.time(get_display_lines, "get_display_lines")
-
----@param symbols Symbols
----@param chars CharConfig
----@param show_guide_lines boolean
----@return string[], Highlight[]
-local function sidebar_get_buf_lines_and_highlights(symbols, chars, show_guide_lines)
-    local any_folded = any_top_level_symbol_has_visible_children(symbols)
-
-    local buf_lines = {}
-    local highlights = {}
-
-    local ft = vim.api.nvim_get_option_value("filetype", { buf = symbols.buf })
-    local kinds_display_config = cfg.get_config_by_filetype(symbols.provider_config.kinds, ft)
-    local kinds_default_config = symbols.provider_config.kinds.default
-    local highlights_config = cfg.get_config_by_filetype(symbols.provider_config.highlights, ft)
-
-    ---@param symbol Symbol
-    ---@param indent string
-    ---@param line_nr integer
-    ---@return integer
-    local function get_buf_lines_and_highlights(symbol, indent, line_nr)
-        if symbols.states[symbol].folded then return line_nr end
-        for sym_i, sym in ipairs(symbol.children) do
-            local state = symbols.states[sym]
-            if state.visible then
-                local prefix
-                if state.visible_children == 0 then
-                    if show_guide_lines and sym.level > 1 then
-                        if sym_i == #symbol.children then
-                            prefix = chars.guide_last_item .. " "
-                        else
-                            prefix = chars.guide_middle_item .. " "
-                        end
-                    else
-                        if any_folded then
-                            prefix = "  "
-                        else
-                            prefix = " "
-                        end
-                    end
-                elseif state.folded then
-                    prefix = chars.folded .. " "
-                else
-                    prefix = chars.unfolded .. " "
-                end
-                if show_guide_lines then
-                    local highlight = nvim.Highlight:new({
-                      group = chars.hl,
-                      line = line_nr,
-                      col_start = #indent,
-                      col_end = #indent + 1
-                    })
-                    table.insert(highlights, highlight)
-                end
-                local kind_display = cfg.kind_for_symbol(kinds_display_config, sym, kinds_default_config)
-                local line = indent .. prefix .. (kind_display ~= "" and (kind_display .. " ") or "") .. sym.name
-                table.insert(buf_lines, line)
-                local highlight = nvim.Highlight:new({
-                    group = highlights_config[sym.kind] or "",
-                    line = line_nr,
-                    col_start = #indent + #prefix,
-                    col_end = #indent + #prefix + #kind_display
-                })
-                table.insert(highlights, highlight)
-                local new_indent
-                if show_guide_lines and sym.level > 1 and sym_i ~= #symbol.children then
-                    new_indent = indent .. chars.guide_vert .. " "
-                else
-                    new_indent = indent .. "  "
-                end
-                if show_guide_lines then
-                    local hl = nvim.Highlight:new({
-                      group = chars.hl,
-                      line = line_nr,
-                      col_start = 1,
-                      col_end = #indent + 1
-                    })
-                    table.insert(highlights, hl)
-                end
-                line_nr = get_buf_lines_and_highlights(sym, new_indent, line_nr + 1)
-            end
-        end
-        return line_nr
-    end
-
-    get_buf_lines_and_highlights(symbols.root, "", 1)
-    return buf_lines, highlights
-end
 
 ---@param symbols Symbols
 ---@return string[]
@@ -1865,11 +1796,19 @@ local function sidebar_get_inline_details(symbols)
 end
 
 ---@param buf integer
+---@param start_line integer zero-indexed
+---@param end_line integer zero-indexed
+local function buf_clear_inline_details(buf, start_line, end_line)
+    vim.api.nvim_buf_clear_namespace(buf, SIDEBAR_EXT_NS, start_line, end_line)
+end
+
+---@param buf integer
+---@param start_line integer zero-indexed
 ---@param details string[]
-local function sidebar_add_inline_details(buf, details)
+local function buf_add_inline_details(buf, start_line, details)
     for line, detail in ipairs(details) do
         vim.api.nvim_buf_set_extmark(
-            buf, SIDEBAR_EXT_NS, line-1, -1,
+            buf, SIDEBAR_EXT_NS, start_line + line - 1, -1,
             {
                 virt_text = { { detail, "Comment" } },
                 virt_text_pos = "eol",
@@ -1885,18 +1824,10 @@ function Sidebar:refresh_view()
     local ctx = DisplayContext:new(self)
     local result = get_display_lines(ctx, 1, symbols.root, true)
 
-    prof.time(function()
-        nvim.buf_set_content(self.buf, result.lines)
-        for _, highlight in ipairs(result.highlights) do
-            highlight:apply(self.buf)
-        end
-    end, "Sidebar.refresh_view.display_result")()
-
-    -- TODO: implement inline details
-    -- if self.show_inline_details then
-    --     local details = sidebar_get_inline_details(symbols)
-    --     sidebar_add_inline_details(self.buf, details)
-    -- end
+    vim.api.nvim_buf_clear_namespace(self.buf, SIDEBAR_EXT_NS, 0, -1)
+    nvim.buf_set_content(self.buf, result.lines)
+    buf_add_highlights(self.buf, result.highlights)
+    buf_add_inline_details(self.buf, 0, result.inline_details)
 
     self:refresh_size()
 end
@@ -2218,37 +2149,48 @@ end
 
 function Sidebar:unfold()
     local symbol, state = self:current_symbol()
-    if not state.folded then return end
+    if not state.folded or state.visible_children == 0 then return end
 
     local symbols = self:current_symbols()
-
-    state.folded = false
-
     local cursor_line = vim.api.nvim_win_get_cursor(self.win)[1]
+    state.folded = false
 
     local ctx = DisplayContext:new(self)
     local result = get_display_lines(ctx, cursor_line, symbol, true)
 
-    local t = prof.Timer:new():start()
     nvim.buf_set_modifiable(self.buf, true)
     nvim.buf_remove_lines(self.buf, cursor_line-1, 1)
     vim.api.nvim_buf_set_lines(self.buf, cursor_line-1, cursor_line-1, true, result.lines)
     nvim.buf_set_modifiable(self.buf, false)
-    t:stop()
-    local msg = string.format("In Sidebar.unfold updating buffer contents took: %0.fus", t:elapsed_us())
-    log.debug(msg)
 
-    do
-        local t = prof.Timer:new():start()
-        for _, hl in ipairs(result.highlights) do hl:apply(self.buf) end
-        t:stop()
-        local msg = string.format("In Sidebar.unfold applying highlights took: %0.fus", t:elapsed_us())
-        log.debug(msg)
-    end
+    buf_add_highlights(self.buf, result.highlights)
+    buf_add_inline_details(self.buf, cursor_line-1, result.inline_details)
 
+    self:set_cursor_at_symbol(symbol, false)
     self:refresh_size()
 end
 Sidebar.unfold = prof.time(Sidebar.unfold, "Sidebar.unfold", { precise = true })
+
+---@param symbol Symbol
+---@param symbol_line integer
+---@param symbol_line_count integer
+function Sidebar:_fold_refresh_display(symbol, symbol_line, symbol_line_count)
+    local ctx = DisplayContext:new(self)
+    local result = get_display_lines(ctx, symbol_line, symbol, false)
+    assert(#result.lines == 1)
+
+    buf_clear_inline_details(self.buf, symbol_line-1, symbol_line-1+symbol_line_count)
+    nvim.buf_set_modifiable(self.buf, true)
+    nvim.buf_remove_lines(self.buf, symbol_line-1, symbol_line_count)
+    nvim.buf_set_lines(self.buf, symbol_line-1, result.lines)
+    nvim.buf_set_modifiable(self.buf, false)
+
+    buf_add_highlights(self.buf, result.highlights)
+    buf_add_inline_details(self.buf, symbol_line-1, result.inline_details)
+
+    self:set_cursor_at_symbol(symbol, false)
+    self:refresh_size()
+end
 
 function Sidebar:fold()
     local symbol, state = self:current_symbol()
@@ -2257,48 +2199,70 @@ function Sidebar:fold()
     if symbol.level > 1 and (state.folded or #symbol.children == 0) then
         symbol = symbol.parent
         assert(symbol ~= nil)
+        self:set_cursor_at_symbol(symbol, false)
         return
     end
 
     local symbols = self:current_symbols()
     local line_count = Symbol_count_lines(symbols, symbol)
     local cursor_line = vim.api.nvim_win_get_cursor(self.win)[1]
-
     state.folded = true
-
-    local ctx = DisplayContext:new(self)
-    local result = get_display_lines(ctx, cursor_line, symbol, false)
-    assert(#result.lines == 1)
-
-    nvim.buf_set_modifiable(self.buf, true)
-    nvim.buf_remove_lines(self.buf, cursor_line-1, line_count)
-    nvim.buf_set_lines(self.buf, cursor_line-1, result.lines)
-    nvim.buf_set_modifiable(self.buf, false)
-
-    for _, hl in ipairs(result.highlights) do hl:apply(self.buf) end
-
-    self:refresh_size()
+    self:_fold_refresh_display(symbol, cursor_line, line_count)
 end
 
 function Sidebar:unfold_recursively()
     local symbols = self:current_symbols()
     local symbol, _ = self:current_symbol()
-    symbol_change_folded_rec(symbols, symbol, false, utils.MAX_INT)
-    self:refresh_view()
+    local symbol_lines = Symbol_count_lines(symbols, symbol)
+    local changed = symbol_change_folded_rec(symbols, symbol, false, utils.MAX_INT)
+    if changed == 0 then return end
+
+    local cursor_line = vim.api.nvim_win_get_cursor(self.win)[1]
+    local ctx = DisplayContext:new(self)
+    local result = get_display_lines(ctx, cursor_line, symbol, true)
+
+    nvim.buf_set_modifiable(self.buf, true)
+    nvim.buf_remove_lines(self.buf, cursor_line-1, symbol_lines)
+    vim.api.nvim_buf_set_lines(self.buf, cursor_line-1, cursor_line-1, true, result.lines)
+    nvim.buf_set_modifiable(self.buf, false)
+
+    buf_add_highlights(self.buf, result.highlights)
+    buf_add_inline_details(self.buf, cursor_line-1, result.inline_details)
+
+    self:set_cursor_at_symbol(symbol, false)
+    self:refresh_size()
 end
+Sidebar.unfold_recursively = prof.time(Sidebar.unfold_recursively, "Sidebar.unfold_recursively")
 
 function Sidebar:fold_recursively()
     local symbols = self:current_symbols()
     local symbol = self:current_symbol()
-    local changes = symbol_change_folded_rec(symbols, symbol, true, utils.MAX_INT)
-    if changes == 0 then
-        while(symbol.level > 1) do
-            symbol = symbol.parent
-            assert(symbol ~= nil)
-        end
-        symbol_change_folded_rec(symbols, symbol, true, utils.MAX_INT)
+
+    -- Line counts have to be calculated before changing folds. Otherwise, they would be synced
+    -- to the internal symbols tree state instead of the displayed state in the buffer.
+    local symbol_lines = Symbol_count_lines(symbols, symbol)
+
+    local top_level_ancestor = symbol
+    while(top_level_ancestor.level > 1) do
+        top_level_ancestor = top_level_ancestor.parent
+        assert(top_level_ancestor ~= nil)
     end
-    self:refresh_view()
+    local top_level_ancestor_lines = Symbol_count_lines(symbols, top_level_ancestor)
+
+    local changes = symbol_change_folded_rec(symbols, symbol, true, utils.MAX_INT)
+
+    if changes == 0 then
+        changes = symbol_change_folded_rec(symbols, top_level_ancestor, true, utils.MAX_INT)
+        if changes == 0 then return end
+
+        self:set_cursor_at_symbol(top_level_ancestor, false)
+        local cursor_line = vim.api.nvim_win_get_cursor(self.win)[1]
+
+        self:_fold_refresh_display(top_level_ancestor, cursor_line, top_level_ancestor_lines)
+    else
+        local cursor_line = vim.api.nvim_win_get_cursor(self.win)[1]
+        self:_fold_refresh_display(symbol, cursor_line, symbol_lines)
+    end
 end
 
 function Sidebar:unfold_one_level()
@@ -2367,24 +2331,7 @@ end
 function Sidebar:unfold_all()
     local symbols = self:current_symbols()
     symbol_change_folded_rec(symbols, symbols.root, false, utils.MAX_INT)
-
-    local cursor_line = 1
-
-    local ctx = DisplayContext:new(self)
-    local result = get_display_lines(ctx, cursor_line, symbols.root, true)
-
-    prof.time(function()
-        nvim.buf_set_modifiable(self.buf, true)
-        nvim.buf_clear_content(self.buf)
-        nvim.buf_set_content(self.buf, result.lines)
-        nvim.buf_set_modifiable(self.buf, false)
-    end, "Sidebar.unfold_all.display_content")()
-
-    for _, hl in ipairs(result.highlights) do
-        hl:apply(self.buf)
-    end
-
-    self:refresh_size()
+    self:refresh_view()
 end
 Sidebar.unfold_all = prof.time(Sidebar.unfold_all, "Sidebar.unfold_all")
 
@@ -2408,7 +2355,14 @@ end
 
 function Sidebar:toggle_details()
     self.show_inline_details = not self.show_inline_details
-    self:refresh_view()
+    if self.show_inline_details then
+        local ctx = DisplayContext:new(self)
+        local symbols = self:current_symbols()
+        local details = get_inline_details(ctx, symbols.root, true)
+        buf_add_inline_details(self.buf, 0, details)
+    else
+        buf_clear_inline_details(self.buf, 0, -1)
+    end
     sidebar_show_toggle_notification(self.win, "inline details", self.show_inline_details)
 end
 
@@ -2865,53 +2819,6 @@ end
 ---@param symbols_retriever SymbolsRetriever
 ---@param config Config
 local function setup_user_commands(gs, sidebars, symbols_retriever, config)
-    create_user_command(
-        "Temp",
-        function(e)
-            local buf = vim.api.nvim_create_buf(false, true)
-            local win = vim.api.nvim_open_win(buf, false, { split = "right", win = 0 })
-
-            local N = 100000
-            local t = {}
-            local cached = {}
-            for i=1,N do
-                t[#t+1] = ""
-                cached[#cached+1] = false
-            end
-
-            vim.api.nvim_buf_set_lines(buf, 0, -1, false, t)
-
-            local function refresh_display()
-                local s, e = vim.fn.line("w0", win), vim.fn.line("w$", win)
-                e = math.min(e, N)
-                local replace = {}
-                local misses = 0
-                for l=s,e do
-                    if not cached[l] then
-                        misses = misses + 1
-                        t[l] = tostring(l)
-                        cached[l] = true
-                    end
-                    replace[#replace+1] = t[l]
-                end
-                if misses > 0 then
-                    vim.api.nvim_buf_set_lines(buf, s-1, e, true, replace)
-                end
-            end
-
-            refresh_display()
-
-            vim.api.nvim_create_autocmd(
-                { "CursorMoved", "WinResized", "WinScrolled", "VimResized" },
-                {
-                    buffer = buf,
-                    callback = refresh_display,
-                }
-            )
-        end,
-        {}
-    )
-
     ---@return Sidebar
     local function _sidebar_new()
         local sidebar, num = find_sidebar_for_reuse(sidebars)
@@ -3139,15 +3046,15 @@ local function setup_autocommands(gs, sidebars, symbols_retriever)
     )
 
     vim.api.nvim_create_autocmd(
-        { "WinScrolled", "WinResized" },
+        { "WinResized", "WinScrolled", "VimResized" },
         {
+            group = global_autocmd_group,
             callback = function(e)
                 local win = tonumber(e.match)
                 assert(win ~= nil)
                 local sidebar = find_sidebar_for_win(sidebars, win)
-                if sidebar ~= nil then
-                    sidebar:refresh_size()
-                end
+                if sidebar == nil then return end
+                sidebar:refresh_size()
             end
         }
     )
