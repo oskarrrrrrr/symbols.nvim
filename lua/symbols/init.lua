@@ -82,6 +82,18 @@ local function buf_add_highlights(buf, highlights)
     end
 end
 
+--- Get the ancestor of the symbol with level = 1.
+---@param symbol Symbol
+---@return Symbol
+local function get_top_level_ancestor(symbol)
+    assert(symbol.level > 0)
+    while symbol.level > 1 do
+        symbol = symbol.parent
+        assert(symbol ~= nil)
+    end
+    return symbol
+end
+
 ---@alias RefreshSymbolsFun fun(symbols: Symbol, provider_name: string, provider_config: table)
 ---@alias KindToHlGroupFun fun(kind: string): string
 ---@alias KindToDisplayFun fun(kind: string): string
@@ -1965,7 +1977,10 @@ end
 ---@param target Symbol
 ---@param unfold boolean
 function Sidebar:set_cursor_at_symbol(target, unfold)
-    local symbols = self:current_symbols()
+    if target.level == 0 then
+        nvim.win_set_cursor(self.win, 1, 0)
+        return
+    end
 
     ---@param outer_range Range
     ---@param inner_range Range
@@ -1988,35 +2003,78 @@ function Sidebar:set_cursor_at_symbol(target, unfold)
         )
     end
 
-    local lines = 0
+    local symbols = self:current_symbols()
+    -- We need the top level ancestor to refresh the view efficiently.
+    local top_level_ancestor = get_top_level_ancestor(target)
+    local top_level_ancestor_lines = Symbol_count_lines(symbols, top_level_ancestor)
+    local top_level_ancestor_line = -1
+    local any_fold_changed = false
+    local current_line = 0
     local current = symbols.root
+
     while current ~= target do
-        if not symbols.states[current].visible then break end
-        if unfold then
-            symbols.states[current].folded = false
-        else
-            if symbols.states[current].folded then break end
+        local state = symbols.states[current]
+
+        if not unfold and state.folded then
+            -- we can't unfold or go deeper so current is the closest we can get to target
+            break
         end
+
+        if unfold and current.level > 0 and state.folded then
+            state.folded = false
+            any_fold_changed = true
+        end
+
         local found = false
         for _, child in ipairs(current.children) do
             if range_contains(child.range, target.range) then
                 if symbols.states[child].visible then
-                    lines = lines + 1
+                    current_line = current_line + 1
                 end
                 current = child
+                if current == top_level_ancestor then
+                    top_level_ancestor_line = current_line
+                end
                 found = true
                 break
             else
-                lines = lines + Symbol_count_lines(symbols, child)
+                current_line = current_line + Symbol_count_lines(symbols, child)
             end
         end
-        if not found then break end
+
+        if not found then
+            -- target must be not visible so current is the closest we can get
+            break
+        end
     end
 
-    if lines == 0 then lines = 1 end
-    if unfold then self:refresh_view() end
-    local ok, err = pcall(vim.api.nvim_win_set_cursor, self.win, { lines, 0 })
-    if not ok then log.warn(err) end
+    if current_line == 0 then
+        -- target must be not be visible and at the beginning of the list of symbols
+        nvim.win_set_cursor(self.win, 1, 0)
+        return
+    end
+
+    if top_level_ancestor_line == -1 then
+        local symbol_path = vim.iter(Symbol_path(target)):join(".")
+        log.warn("Top level ancestor not encountered when setting the cursor to: " .. symbol_path)
+        return
+    end
+
+    if any_fold_changed then
+        local ctx = DisplayContext:new(self)
+        local result = get_display_lines(ctx, top_level_ancestor_line, top_level_ancestor, true)
+
+        nvim.buf_set_modifiable(self.buf, true)
+        nvim.buf_remove_lines(self.buf, top_level_ancestor_line-1, top_level_ancestor_lines)
+        vim.api.nvim_buf_set_lines(self.buf, top_level_ancestor_line-1, top_level_ancestor_line-1, true, result.lines)
+        nvim.buf_set_modifiable(self.buf, false)
+
+        buf_add_highlights(self.buf, result.highlights)
+        buf_add_inline_details(self.buf, top_level_ancestor_line-1, result.inline_details)
+    end
+
+    nvim.win_set_cursor(self.win, current_line, 0)
+    self:refresh_size()
 end
 
 ---@param win integer
@@ -2147,34 +2205,39 @@ function Sidebar:next_symbol_at_level()
     self:set_cursor_at_symbol(symbol.parent.children[new_idx], false)
 end
 
+---@param symbol Symbol
+---@param symbol_line integer
+function Sidebar:_unfold(symbol, symbol_line)
+    local ctx = DisplayContext:new(self)
+    local result = get_display_lines(ctx, symbol_line, symbol, true)
+
+    nvim.buf_set_modifiable(self.buf, true)
+    nvim.buf_remove_lines(self.buf, symbol_line-1, 1)
+    vim.api.nvim_buf_set_lines(self.buf, symbol_line-1, symbol_line-1, true, result.lines)
+    nvim.buf_set_modifiable(self.buf, false)
+
+    buf_add_highlights(self.buf, result.highlights)
+    buf_add_inline_details(self.buf, symbol_line-1, result.inline_details)
+
+    self:set_cursor_at_symbol(symbol, false)
+    self:refresh_size()
+end
+
 function Sidebar:unfold()
     local symbol, state = self:current_symbol()
     if not state.folded or state.visible_children == 0 then return end
 
-    local symbols = self:current_symbols()
     local cursor_line = vim.api.nvim_win_get_cursor(self.win)[1]
     state.folded = false
 
-    local ctx = DisplayContext:new(self)
-    local result = get_display_lines(ctx, cursor_line, symbol, true)
-
-    nvim.buf_set_modifiable(self.buf, true)
-    nvim.buf_remove_lines(self.buf, cursor_line-1, 1)
-    vim.api.nvim_buf_set_lines(self.buf, cursor_line-1, cursor_line-1, true, result.lines)
-    nvim.buf_set_modifiable(self.buf, false)
-
-    buf_add_highlights(self.buf, result.highlights)
-    buf_add_inline_details(self.buf, cursor_line-1, result.inline_details)
-
-    self:set_cursor_at_symbol(symbol, false)
-    self:refresh_size()
+    self:_unfold(symbol, cursor_line)
 end
 Sidebar.unfold = prof.time(Sidebar.unfold, "Sidebar.unfold", { precise = true })
 
 ---@param symbol Symbol
 ---@param symbol_line integer
 ---@param symbol_line_count integer
-function Sidebar:_fold_refresh_display(symbol, symbol_line, symbol_line_count)
+function Sidebar:_fold(symbol, symbol_line, symbol_line_count)
     local ctx = DisplayContext:new(self)
     local result = get_display_lines(ctx, symbol_line, symbol, false)
     assert(#result.lines == 1)
@@ -2207,7 +2270,7 @@ function Sidebar:fold()
     local line_count = Symbol_count_lines(symbols, symbol)
     local cursor_line = vim.api.nvim_win_get_cursor(self.win)[1]
     state.folded = true
-    self:_fold_refresh_display(symbol, cursor_line, line_count)
+    self:_fold(symbol, cursor_line, line_count)
 end
 
 function Sidebar:unfold_recursively()
@@ -2242,11 +2305,7 @@ function Sidebar:fold_recursively()
     -- to the internal symbols tree state instead of the displayed state in the buffer.
     local symbol_lines = Symbol_count_lines(symbols, symbol)
 
-    local top_level_ancestor = symbol
-    while(top_level_ancestor.level > 1) do
-        top_level_ancestor = top_level_ancestor.parent
-        assert(top_level_ancestor ~= nil)
-    end
+    local top_level_ancestor = get_top_level_ancestor(symbol)
     local top_level_ancestor_lines = Symbol_count_lines(symbols, top_level_ancestor)
 
     local changes = symbol_change_folded_rec(symbols, symbol, true, utils.MAX_INT)
@@ -2258,10 +2317,10 @@ function Sidebar:fold_recursively()
         self:set_cursor_at_symbol(top_level_ancestor, false)
         local cursor_line = vim.api.nvim_win_get_cursor(self.win)[1]
 
-        self:_fold_refresh_display(top_level_ancestor, cursor_line, top_level_ancestor_lines)
+        self:_fold(top_level_ancestor, cursor_line, top_level_ancestor_lines)
     else
         local cursor_line = vim.api.nvim_win_get_cursor(self.win)[1]
-        self:_fold_refresh_display(symbol, cursor_line, symbol_lines)
+        self:_fold(symbol, cursor_line, symbol_lines)
     end
 end
 
@@ -2285,8 +2344,8 @@ function Sidebar:unfold_one_level()
 
     local level = find_level_to_unfold(symbols.root)
     local count = math.max(vim.v.count, 1)
-    symbol_change_folded_rec(symbols, symbols.root, false, level + count)
-    self:refresh_view()
+    local changes = symbol_change_folded_rec(symbols, symbols.root, false, level + count)
+    if changes > 0 then self:refresh_view() end
 end
 
 function Sidebar:fold_one_level()
@@ -2325,21 +2384,24 @@ function Sidebar:fold_one_level()
     for i=1,math.min(level, count) do
         _change_fold_at_level(symbols, level - i + 1, true)
     end
+    -- TODO: do not refresh if no changes made
     self:refresh_view()
 end
 
 function Sidebar:unfold_all()
     local symbols = self:current_symbols()
-    symbol_change_folded_rec(symbols, symbols.root, false, utils.MAX_INT)
-    self:refresh_view()
+    local changes = symbol_change_folded_rec(symbols, symbols.root, false, utils.MAX_INT)
+    if changes > 0 then self:refresh_view() end
 end
 Sidebar.unfold_all = prof.time(Sidebar.unfold_all, "Sidebar.unfold_all")
 
 function Sidebar:fold_all()
     local symbols = self:current_symbols()
-    symbol_change_folded_rec(symbols, symbols.root, true, utils.MAX_INT)
+    -- to make sure that we do not include the root in the number of changes
+    symbols.states[symbols.root].folded = true
+    local changes = symbol_change_folded_rec(symbols, symbols.root, true, utils.MAX_INT)
     symbols.states[symbols.root].folded = false
-    self:refresh_view()
+    if changes > 0 then self:refresh_view() end
 end
 
 function Sidebar:search()
@@ -2349,8 +2411,7 @@ end
 function Sidebar:toggle_fold()
     local symbol, state = self:current_symbol()
     if #symbol.children == 0 then return end
-    state.folded = not state.folded
-    self:refresh_view()
+    if state.folded then self:unfold() else self:fold() end
 end
 
 function Sidebar:toggle_details()
@@ -2410,6 +2471,7 @@ end
 
 function Sidebar:toggle_auto_resize()
     self.auto_resize.enabled = not self.auto_resize.enabled
+    if self.auto_resize.enabled then self:refresh_size() end
     sidebar_show_toggle_notification(self.win, "auto resize", self.auto_resize.enabled)
 end
 

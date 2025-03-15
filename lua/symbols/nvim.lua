@@ -1,3 +1,5 @@
+local log = require("symbols.log")
+
 local nvim = {}
 
 ---@param buf integer
@@ -67,6 +69,14 @@ function nvim.win_get_visible_lines(win)
     local top_line, bottom_line = vim.fn.line("w0", win), vim.fn.line("w$", win)
     local buf = vim.api.nvim_win_get_buf(win)
     return vim.api.nvim_buf_get_lines(buf, top_line-1, bottom_line, true)
+end
+
+---@param win integer
+---@param line integer one-indexed
+---@param column integer? zero-indexed; 0 by default
+function nvim.win_set_cursor(win, line, column)
+    local ok, err = pcall(vim.api.nvim_win_set_cursor, win, { line, column or 0 })
+    if not ok then log.warn(err) end
 end
 
 ---@class Highlight
