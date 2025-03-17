@@ -14,7 +14,7 @@ https://github.com/user-attachments/assets/6262fa59-a320-4043-a3ba-97617f0fd8b3
 
 ## Features
 
-- **Listing Symbols** - duh. Uses LSP servers and treesitter parsers which have to
+- **Listing Symbols** - duh. Uses LSP servers and Treesitter parsers which have to
   be configured by the user.
 - **Fuzzy Search** - fuzzy search symbols directly from the sidebar
 - **Preview Window** - glance at the code before committing to your next action.
@@ -135,21 +135,6 @@ navigation are:
 
 You can navigate the sidebar with a mouse. Left click to select a symbol,
 double click to toggle fold, right click to peek the symbol.
-
-## Big Files
-
-To work with really big files in Neovim you have to turn off LSPs, treesitter
-and more. You can do that with some custom lua code or use a plugin like:
-`LunarVim/bigfile.nvim`. The sidebar will not work when LSPs and treesitter are
-turned off thus causing no slow downs.
-
-What if you notice slow downs while working on a file of reasonable size?
-
-- If you notice slow downs when moving the cursor around then try setting
-  `sidebar.cursor_follow` to false.
-- If you notice lagging on save then it might be the sidebar refreshing. For
-  now the only solution is to stop using the plugin with large files.
-- You can let me know about the problem via issues on GitHub.
 
 # Commands
 
