@@ -233,7 +233,7 @@ Default config below.
             -- Whether the sidebar should wrap text.
             wrap = false,
             -- Whether to show the guide lines.
-            show_guide_lines = false,
+            show_guide_lines = true,
             chars = {
                 folded = "",
                 unfolded = "",
