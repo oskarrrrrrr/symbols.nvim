@@ -9,6 +9,9 @@ nvim:
 test:
 	# Before running the tests for the first time, open Neovim with the following command
 	# to allow it to install all the Treesitter parsers: nvim -u tests/nvim_test/init.lua
+	#
+	# To update tests - remove files manually from tests/screenshots directory.
+	#
 	@nvim --headless --noplugin -u tests/nvim_tester/init.lua -c "lua MiniTest.run()"
 
 .PHONY: gen-docs

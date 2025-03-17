@@ -1792,7 +1792,8 @@ local function get_display_lines(ctx, line_nr, symbol, recurse)
             local hl = nvim.Highlight:new({ group = ctx.chars.hl, line = line_nr + #result.lines, col_start = 1, col_end = line_len })
             table.insert(result.highlights, hl)
         else
-            line_add("  ")
+            local space = (symbol.level == 1 and ctx.using_folds) and "  " or " "
+            line_add(space)
         end
 
         local prefix_len = line_len
