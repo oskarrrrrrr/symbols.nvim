@@ -1,5 +1,4 @@
 local log = require("symbols.log")
-local prof = require("symbols.profile")
 
 local nvim = {}
 
@@ -79,7 +78,6 @@ function nvim.win_get_visible_lines(win, before, after)
         true
     )
 end
-nvim.win_get_visible_lines = prof.time(nvim.win_get_visible_lines, "nvim.win_get_visible_lines")
 
 ---@param win integer
 ---@param line integer one-indexed

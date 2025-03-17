@@ -1,7 +1,6 @@
 local cfg = require("symbols.config")
 local utils = require("symbols.utils")
 local log = require("symbols.log")
-local prof = require("symbols.profile")
 
 local nvim = require("symbols.nvim")
 
@@ -1112,7 +1111,6 @@ function SearchView:search()
     for _, highlight in ipairs(highlights) do highlight:apply(self.buf) end
     vim.api.nvim_win_set_cursor(self.sidebar.win, { 1, 0 })
 end
-SearchView.search = prof.time(SearchView.search, "SearchView.search")
 
 function SearchView:hide()
     if vim.api.nvim_win_is_valid(self.prompt_win) then
@@ -1458,7 +1456,6 @@ function Sidebar:refresh_size()
     vert_resize = math.min(self.auto_resize.max_width, vert_resize)
     self:change_size(vert_resize)
 end
-Sidebar.refresh_size = prof.time(Sidebar.refresh_size, "Sidebar.refresh_size", { precise = true })
 
 -- After this many ms of inactivity (no Sidebar.schedule_refresh_size calls) the sidebar will refresh its size
 -- Too small of a value will cause repeated size refreshing when performing many quick actions, e.g. imagine
@@ -1842,33 +1839,6 @@ local function get_display_lines(ctx, line_nr, symbol, recurse)
 
     return result
 end
-get_display_lines = prof.time(get_display_lines, "get_display_lines")
-
----@param symbols Symbols
----@return string[]
-local function sidebar_get_inline_details(symbols)
-    local details = {}
-    local ft = vim.bo[symbols.buf].filetype
-    local details_fun = symbols.provider_config.details[ft]
-    if details_fun == nil then
-        details_fun = function(symbol, _) return symbol.detail end
-    end
-
-    ---@param symbol Symbol
-    local function get_details(symbol)
-        if symbols.states[symbol].folded then return end
-        for _, child in ipairs(symbol.children) do
-            if symbols.states[child].visible then
-                local detail = details_fun(child, { symbol_states = symbols.states })
-                table.insert(details, detail)
-                get_details(child)
-            end
-        end
-    end
-
-    get_details(symbols.root)
-    return details
-end
 
 ---@param buf integer
 ---@param start_line integer zero-indexed
@@ -1906,7 +1876,6 @@ function Sidebar:refresh_view()
 
     self:refresh_size()
 end
-Sidebar.refresh_view = prof.time(Sidebar.refresh_view, "Sidebar.refresh_view")
 
 function Sidebar:refresh_symbols()
     if not self:visible() then
@@ -1962,7 +1931,6 @@ function Sidebar:refresh_symbols()
         self:replace_current_symbols(new_symbols)
         self:refresh_view()
     end
-    _refresh_sidebar = prof.time(_refresh_sidebar, "_refresh_sidebar")
 
     ---@param provider_name string
     local function on_fail(provider_name)
@@ -2024,7 +1992,6 @@ local function symbol_change_folded_rec(symbols, start_symbol, value, depth_limi
 
     return _change_folded_rec(start_symbol, depth_limit)
 end
-symbol_change_folded_rec = prof.time(symbol_change_folded_rec, "symbol_change_folded_rec")
 
 ---@param symbols Symbols
 ---@param symbol Symbol
@@ -2298,7 +2265,6 @@ function Sidebar:unfold()
 
     self:_unfold(symbol, cursor_line)
 end
-Sidebar.unfold = prof.time(Sidebar.unfold, "Sidebar.unfold", { precise = true })
 
 ---@param symbol Symbol
 ---@param symbol_line integer
@@ -2361,7 +2327,6 @@ function Sidebar:unfold_recursively()
     self:set_cursor_at_symbol(symbol, false)
     self:schedule_refresh_size()
 end
-Sidebar.unfold_recursively = prof.time(Sidebar.unfold_recursively, "Sidebar.unfold_recursively")
 
 function Sidebar:fold_recursively()
     local symbols = self:current_symbols()
@@ -2459,7 +2424,6 @@ function Sidebar:unfold_all()
     local changes = symbol_change_folded_rec(symbols, symbols.root, false, utils.MAX_INT)
     if changes > 0 then self:refresh_view() end
 end
-Sidebar.unfold_all = prof.time(Sidebar.unfold_all, "Sidebar.unfold_all")
 
 function Sidebar:fold_all()
     local symbols = self:current_symbols()
@@ -2812,7 +2776,6 @@ local function sidebar_new(sidebar, symbols_retriever, num, config, gs, debug)
         local symbol = symbol_at_pos(symbols.root, pos)
         sidebar:set_cursor_at_symbol(symbol, false)
     end
-    -- cursor_follow = prof.time(cursor_follow, "cursor_follow", { precise = true })
 
     vim.api.nvim_create_autocmd(
         { "CursorMoved" },

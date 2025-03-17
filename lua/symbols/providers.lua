@@ -1,5 +1,4 @@
 local utils = require("symbols.utils")
-local prof = require("symbols.profile")
 local log = require("symbols.log")
 
 local _symbol = require("symbols.symbol")
@@ -126,7 +125,6 @@ local function rec_tidy_lsp_symbol(lsp_symbol, parent, level)
         end
     end
 end
-rec_tidy_lsp_symbol = prof.time(rec_tidy_lsp_symbol, "rec_tidy_lsp_symbol")
 
 ---@class LspProvider: Provider
 ---@field client any
@@ -153,9 +151,6 @@ function LspProvider:supports(buf)
 end
 
 function LspProvider:async_get_symbols(buf, refresh_symbols, on_fail, on_timeout)
-    local language_server_timer
-    if prof.ON then language_server_timer = prof.Timer:new():start() end
-
     local got_symbols = false
 
     ---@param sym1 Symbol
@@ -179,12 +174,6 @@ function LspProvider:async_get_symbols(buf, refresh_symbols, on_fail, on_timeout
     end
 
     local function handler(err, result, _, _)
-        if prof.ON then
-            local elapsed = language_server_timer:stop():elapsed_ms()
-            local msg = string.format("%s language server took: %0.fms", self.client.name, elapsed)
-            log.debug(msg)
-        end
-
         got_symbols = true
         if err ~= nil then
             on_fail()
@@ -196,7 +185,6 @@ function LspProvider:async_get_symbols(buf, refresh_symbols, on_fail, on_timeout
         sort_symbols(root)
         refresh_symbols(root)
     end
-    handler = prof.time(handler, "LspProvider:async_get_symbols.handler")
 
     local params = { textDocument = vim.lsp.util.make_text_document_params(buf), }
     local ok, request_id = self.client.request(vim.lsp.protocol.Methods.textDocument_documentSymbol, params, handler)

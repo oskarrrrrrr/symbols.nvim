@@ -2,7 +2,7 @@ local log = require("symbols.log")
 
 local prof = {}
 
-prof.ON = true
+prof.ON = false
 
 function prof.time(f, fname, opts)
     opts = opts or {}
