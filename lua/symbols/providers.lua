@@ -1,5 +1,4 @@
 local utils = require("symbols.utils")
-local log = require("symbols.log")
 
 local _symbol = require("symbols.symbol")
 local Symbol_root = _symbol.Symbol_root
