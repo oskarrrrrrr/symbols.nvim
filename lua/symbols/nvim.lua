@@ -1,4 +1,5 @@
 local log = require("symbols.log")
+local prof = require("symbols.profile")
 
 local nvim = {}
 
@@ -68,8 +69,15 @@ end
 function nvim.win_get_visible_lines(win)
     local top_line, bottom_line = vim.fn.line("w0", win), vim.fn.line("w$", win)
     local buf = vim.api.nvim_win_get_buf(win)
-    return vim.api.nvim_buf_get_lines(buf, top_line-1, bottom_line, true)
+    local context_len = 5000
+    return vim.api.nvim_buf_get_lines(
+        buf,
+        math.max(0, top_line-1-context_len),
+        math.min(vim.fn.line("$", win), bottom_line+context_len),
+        true
+    )
 end
+nvim.win_get_visible_lines = prof.time(nvim.win_get_visible_lines, "nvim.win_get_visible_lines")
 
 ---@param win integer
 ---@param line integer one-indexed

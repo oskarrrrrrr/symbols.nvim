@@ -1,4 +1,3 @@
--- vim: ts=4:sw=4:set et
 local cfg = require("symbols.config")
 local utils = require("symbols.utils")
 local log = require("symbols.log")
@@ -1282,7 +1281,6 @@ function Sidebar:change_view(new_view)
 
     if new_view == "symbols" then
         vim.api.nvim_win_set_buf(self.win, self.buf)
-        self:refresh_view()
     elseif new_view == "search" then
         self.search_view:show()
     else
@@ -1423,10 +1421,7 @@ end
 
 ---@param vert_size integer
 function Sidebar:change_size(vert_size)
-    local original_win = vim.api.nvim_get_current_win()
-    vim.api.nvim_set_current_win(self.win)
-    vim.cmd("vertical resize " .. tostring(vert_size))
-    vim.api.nvim_set_current_win(original_win)
+    vim.api.nvim_win_set_width(self.win, vert_size)
 end
 
 function Sidebar:refresh_size()
@@ -1939,19 +1934,22 @@ end
 ---@param start_symbol Symbol
 ---@param value boolean
 ---@param depth_limit integer
----@return integer
+---@return integer # number of changes
 local function symbol_change_folded_rec(symbols, start_symbol, value, depth_limit)
+    assert(depth_limit > 0)
 
     ---@param symbol Symbol
     ---@param dl integer
-    ---@return integer
+    ---@return integer #number of changes
     local function _change_folded_rec(symbol, dl)
         if dl <= 0 then return 0 end
-        local symbol_state = symbols.states[symbol]
-        local changes = (symbol_state.folded ~= value and #symbol.children > 0 and 1) or 0
-        symbol_state.folded = value
-        for _, sym in ipairs(symbol.children) do
-            changes = changes + _change_folded_rec(sym, dl-1)
+        local state = symbols.states[symbol]
+        local changes = (state.folded ~= value and #symbol.children > 0 and 1) or 0
+        state.folded = value
+        for _, child in ipairs(symbol.children) do
+            if symbols.states[child].visible then
+                changes = changes + _change_folded_rec(child, dl-1)
+            end
         end
         return changes
     end
@@ -3107,16 +3105,54 @@ local function setup_autocommands(gs, sidebars, symbols_retriever)
         }
     )
 
+    local PERIOD_MS_SIZE_REFRESH = 50
+    local win_has_callback_running = {}
+    local win_last_scroll_ms = {}
+    local ignore_next = false
+
     vim.api.nvim_create_autocmd(
-        { "WinResized", "WinScrolled", "VimResized" },
+        { "WinScrolled" },
         {
             group = global_autocmd_group,
             callback = function(e)
+                if ignore_next then
+                    ignore_next = false
+                    return
+                end
+
                 local win = tonumber(e.match)
                 assert(win ~= nil)
+
+                win_last_scroll_ms[win] = vim.uv.hrtime() / 1e6
+
                 local sidebar = find_sidebar_for_win(sidebars, win)
                 if sidebar == nil then return end
-                sidebar:refresh_size()
+
+                if win_has_callback_running[win] then return end
+                win_has_callback_running[win] = true
+
+                local timer = vim.uv.new_timer()
+                timer:start(
+                    32,
+                    32,
+                    function()
+                        local now_ms = vim.uv.hrtime() / 1e6
+                        local diff_ms = now_ms - win_last_scroll_ms[win]
+                        if diff_ms > PERIOD_MS_SIZE_REFRESH then
+                            ignore_next = true
+                            local sidebar = find_sidebar_for_win(sidebars, win)
+                            if sidebar ~= nil and sidebar:visible() then
+                                vim.schedule(function() sidebar:refresh_size() end)
+                            end
+                            win_has_callback_running[win] = nil
+                            win_last_scroll_ms[win] = nil
+                            timer:stop()
+                            timer:close()
+                        end
+                    end,
+                    { ["repeat"] = -1 }
+                )
+
             end
         }
     )
