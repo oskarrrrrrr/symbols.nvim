@@ -65,15 +65,17 @@ function nvim.win_set_option(win, name, value)
 end
 
 ---@param win integer
+---@param before? integer # fetch this many additional lines before the first visible line; 0 by default
+---@param after? integer # fetch this many additional lines after the last visible line; 0 by default
 ---@return string[]
-function nvim.win_get_visible_lines(win)
+function nvim.win_get_visible_lines(win, before, after)
+    before, after = before or 0, after or 0
     local top_line, bottom_line = vim.fn.line("w0", win), vim.fn.line("w$", win)
     local buf = vim.api.nvim_win_get_buf(win)
-    local context_len = 5000
     return vim.api.nvim_buf_get_lines(
         buf,
-        math.max(0, top_line-1-context_len),
-        math.min(vim.fn.line("$", win), bottom_line+context_len),
+        math.max(0, top_line-1-before),
+        math.min(vim.fn.line("$", win), bottom_line+after),
         true
     )
 end

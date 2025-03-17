@@ -18,6 +18,11 @@ M.FILE_TYPE_MAIN = "SymbolsSidebar"
 M.FILE_TYPE_SEARCH = "SymbolsSearch"
 M.FILE_TYPE_HELP = "SymbolsHelp"
 
+---@return number
+local function relative_time_ms()
+    return vim.uv.hrtime() / 1e6
+end
+
 ---@type table<string, boolean>
 local cmds = {}
 
@@ -1213,6 +1218,9 @@ end
 ---@field cursor_follow boolean
 ---@field auto_peek boolean
 ---@field close_on_goto boolean
+---@field resize_callback_running boolean
+---@field resize_last_schedule_ms number
+---@field resize_ignore_next boolean
 local Sidebar = {}
 Sidebar.__index = Sidebar ---@diagnostic disable-line
 
@@ -1252,6 +1260,9 @@ function Sidebar:new()
         cursor_follow = config.cursor_follow,
         auto_peek = config.auto_peek,
         close_on_goto = config.close_on_goto,
+        resize_callback_running = false,
+        resize_last_schedule_ms = relative_time_ms(),
+        resize_ignore_next = false,
     }
     return setmetatable(s, self)
 
@@ -1424,9 +1435,19 @@ function Sidebar:change_size(vert_size)
     vim.api.nvim_win_set_width(self.win, vert_size)
 end
 
+--- TODO: consider using a config option for this
+--- Refreshing size uses the currently visible lines to adjust the sidebar window width.
+--- This constant allows to adjust the number of additional lines that will be taken
+--- into account. More precisely, it's the number of extra lines preceeding and suceeding the visible
+--- lines that will be considered for resizing. Setting this number to 0 would make resizing the most
+--- responsive but also jerky as it would adjust every time the sidebar is scrolled. Setting it
+--- to a big enough value removes the jerkiness and is still fast. Setting it to a too high of
+--- a value will cause slow downs but remove any "unnecessary" resizing.
+local REFRESH_SIZE_CONTEXT_LEN = 5000
+
 function Sidebar:refresh_size()
     if not self:visible() or not self.auto_resize.enabled then return end
-    local buf_lines = nvim.win_get_visible_lines(self.win)
+    local buf_lines = nvim.win_get_visible_lines(self.win, REFRESH_SIZE_CONTEXT_LEN, REFRESH_SIZE_CONTEXT_LEN)
     local vert_resize = self.fixed_width
     local max_line_len = 0
     for _, line in ipairs(buf_lines) do
@@ -1438,6 +1459,53 @@ function Sidebar:refresh_size()
     self:change_size(vert_resize)
 end
 Sidebar.refresh_size = prof.time(Sidebar.refresh_size, "Sidebar.refresh_size", { precise = true })
+
+-- After this many ms of inactivity (no Sidebar.schedule_refresh_size calls) the sidebar will refresh its size
+-- Too small of a value will cause repeated size refreshing when performing many quick actions, e.g. imagine
+-- someone folding and unfolding a symbol multiple times in a quick succession. Resizing can be slow when there
+-- are large files open in the same tab, so it's better to not refresh all the time.
+local DELAY_MS_SIZE_REFRESH = 100
+
+-- Every this many ms a function will run to check when the Sidebar.schedule_refresh_size function was called
+-- and decide whether to refresh the sidebar size. After refreshing the size it will no longer run until
+-- the Sidebar.schedule_refresh_size function is called again.
+-- Small values will give fast response time, too small of a value can cause slow downs.
+local PERIOD_MS_SIZE_REFRESH_CHECK = 32
+
+-- Refreshing size is slow for large files, thus for quick actions it's advised to use this function
+-- instead of refreshing the size immediately. Otherwise, we the user can easily trigger multiple size
+-- refreshes in short time which are redundant (and slow). This function will refresh the size after
+-- DELAY_MS_SIZE_REFRESH miliseconds of inactivity (no calls to this function) with
+-- PERIOD_MS_SIZE_REFRESH_CHECK precision.
+function Sidebar:schedule_refresh_size()
+    -- This is needed because changing size triggers WinScrolled event which calls this function.
+    -- Without ignoring that call we would be constatly scheduling size refresh.
+    if self.resize_ignore_next then
+        self.resize_ignore_next = false
+        return
+    end
+
+    self.resize_last_schedule_ms = relative_time_ms()
+    if self.resize_callback_running then return end
+    self.resize_callback_running = true
+
+    local timer = vim.uv.new_timer()
+    timer:start(
+        PERIOD_MS_SIZE_REFRESH_CHECK, PERIOD_MS_SIZE_REFRESH_CHECK,
+        function()
+            local now_ms = relative_time_ms()
+            local diff_ms = now_ms - self.resize_last_schedule_ms
+            if diff_ms > DELAY_MS_SIZE_REFRESH then
+                vim.schedule(function() self:refresh_size() end)
+                self.resize_callback_running = false
+                self.resize_ignore_next = true
+                timer:stop()
+                timer:close()
+            end
+        end,
+        { ["repeat"] = -1 }
+    )
+end
 
 ---@param dir OpenDirection
 ---@return "left" | "right"
@@ -2072,7 +2140,7 @@ function Sidebar:set_cursor_at_symbol(target, unfold)
     end
 
     nvim.win_set_cursor(self.win, current_line, 0)
-    self:refresh_size()
+    self:schedule_refresh_size()
 end
 
 ---@param win integer
@@ -2218,7 +2286,7 @@ function Sidebar:_unfold(symbol, symbol_line)
     buf_add_inline_details(self.buf, symbol_line-1, result.inline_details)
 
     self:set_cursor_at_symbol(symbol, false)
-    self:refresh_size()
+    self:schedule_refresh_size()
 end
 
 function Sidebar:unfold()
@@ -2250,7 +2318,7 @@ function Sidebar:_fold(symbol, symbol_line, symbol_line_count)
     buf_add_inline_details(self.buf, symbol_line-1, result.inline_details)
 
     self:set_cursor_at_symbol(symbol, false)
-    self:refresh_size()
+    self:schedule_refresh_size()
 end
 
 function Sidebar:fold()
@@ -2291,7 +2359,7 @@ function Sidebar:unfold_recursively()
     buf_add_inline_details(self.buf, cursor_line-1, result.inline_details)
 
     self:set_cursor_at_symbol(symbol, false)
-    self:refresh_size()
+    self:schedule_refresh_size()
 end
 Sidebar.unfold_recursively = prof.time(Sidebar.unfold_recursively, "Sidebar.unfold_recursively")
 
@@ -2469,22 +2537,28 @@ end
 
 function Sidebar:toggle_auto_resize()
     self.auto_resize.enabled = not self.auto_resize.enabled
-    if self.auto_resize.enabled then self:refresh_size() end
+    if self.auto_resize.enabled then self:schedule_refresh_size() end
     sidebar_show_toggle_notification(self.win, "auto resize", self.auto_resize.enabled)
 end
 
 function Sidebar:decrease_max_width()
     local count = 5 * ((vim.v.count == 0 and 1) or vim.v.count)
-    vim.cmd("vert resize -" .. tostring(count))
     self.auto_resize.max_width = self.auto_resize.max_width - count
-    self:refresh_size()
+    if self.auto_resize.enabled then
+        self:refresh_size()
+    else
+        vim.cmd("vert resize -" .. tostring(count))
+    end
 end
 
 function Sidebar:increase_max_width()
     local count = 5 * ((vim.v.count == 0 and 1) or vim.v.count)
-    vim.cmd("vert resize " .. tostring(count))
     self.auto_resize.max_width = self.auto_resize.max_width + count
-    self:refresh_size()
+    if self.auto_resize.enabled then
+        self:refresh_size()
+    else
+        vim.cmd("vert resize +" .. tostring(count))
+    end
 end
 
 ---@type SidebarAction[]
@@ -3105,54 +3179,16 @@ local function setup_autocommands(gs, sidebars, symbols_retriever)
         }
     )
 
-    local PERIOD_MS_SIZE_REFRESH = 50
-    local win_has_callback_running = {}
-    local win_last_scroll_ms = {}
-    local ignore_next = false
-
     vim.api.nvim_create_autocmd(
         { "WinScrolled" },
         {
             group = global_autocmd_group,
             callback = function(e)
-                if ignore_next then
-                    ignore_next = false
-                    return
-                end
-
                 local win = tonumber(e.match)
                 assert(win ~= nil)
-
-                win_last_scroll_ms[win] = vim.uv.hrtime() / 1e6
-
                 local sidebar = find_sidebar_for_win(sidebars, win)
                 if sidebar == nil then return end
-
-                if win_has_callback_running[win] then return end
-                win_has_callback_running[win] = true
-
-                local timer = vim.uv.new_timer()
-                timer:start(
-                    32,
-                    32,
-                    function()
-                        local now_ms = vim.uv.hrtime() / 1e6
-                        local diff_ms = now_ms - win_last_scroll_ms[win]
-                        if diff_ms > PERIOD_MS_SIZE_REFRESH then
-                            ignore_next = true
-                            local sidebar = find_sidebar_for_win(sidebars, win)
-                            if sidebar ~= nil and sidebar:visible() then
-                                vim.schedule(function() sidebar:refresh_size() end)
-                            end
-                            win_has_callback_running[win] = nil
-                            win_last_scroll_ms[win] = nil
-                            timer:stop()
-                            timer:close()
-                        end
-                    end,
-                    { ["repeat"] = -1 }
-                )
-
+                sidebar:schedule_refresh_size()
             end
         }
     )
