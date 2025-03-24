@@ -3,7 +3,7 @@ local utils = require("symbols.utils")
 local _symbol = require("symbols.symbol")
 local Symbol_root = _symbol.Symbol_root
 
----@alias ProviderAsyncGetSymbols fun(self: Provider, buf: integer, refresh_symbols: fun(root: Symbol), on_fail: fun(), on_timeout: fun())
+---@alias ProviderAsyncGetSymbols fun(self: Provider, buf: integer, refresh_symbols: fun(root: Symbol), on_fail: fun(), on_timeout: fun()) string?
 ---@alias ProviderGetSymbols fun(self: Provider, buf: integer): boolean, Symbol?
 
 ---@class Provider
@@ -188,7 +188,10 @@ function LspProvider:async_get_symbols(buf, refresh_symbols, on_fail, on_timeout
 
     local params = { textDocument = vim.lsp.util.make_text_document_params(buf), }
     local ok, request_id = self.client.request(vim.lsp.protocol.Methods.textDocument_documentSymbol, params, handler)
-    if not ok then on_fail() end
+    if not ok then
+        on_fail()
+        return
+    end
 
     vim.defer_fn(
         function()
