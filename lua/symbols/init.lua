@@ -1,6 +1,7 @@
 local cfg = require("symbols.config")
 local utils = require("symbols.utils")
 local log = require("symbols.log")
+local a = require("symbols.async")
 
 local nvim = require("symbols.nvim")
 
@@ -1959,7 +1960,10 @@ function Sidebar:refresh_view()
     self:refresh_size()
 end
 
-function Sidebar:force_refresh_symbols()
+---@param callback fun() | nil
+function Sidebar:force_refresh_symbols(callback)
+    callback = callback or function(...) end
+
     ---@return Symbol?
     local function _find_symbol_with_name(symbol, name)
         for _, sym in ipairs(symbol.children) do
@@ -2005,6 +2009,7 @@ function Sidebar:force_refresh_symbols()
         Symbols_apply_filter(new_symbols, symbols_filter)
         self:replace_current_symbols(new_symbols)
         self:refresh_view()
+        callback()
     end
 
     ---@param provider_name string
@@ -2012,6 +2017,7 @@ function Sidebar:force_refresh_symbols()
         local lines = { "", " [symbols.nvim]", "", " " .. provider_name .. " provider failed" }
         nvim.buf_set_content(self.buf, lines)
         self:refresh_size()
+        callback()
     end
 
     ---@param provider_name string
@@ -2022,6 +2028,7 @@ function Sidebar:force_refresh_symbols()
         }
         nvim.buf_set_content(self.buf, lines)
         self:refresh_size()
+        callback()
     end
 
     local buf = self:source_win_buf()
@@ -2038,8 +2045,11 @@ function Sidebar:force_refresh_symbols()
         end
         nvim.buf_set_content(self.buf, lines)
         self:refresh_size()
+        callback()
     end
 end
+
+Sidebar.force_refresh_symbols_co = a.wrap(Sidebar.force_refresh_symbols)
 
 function Sidebar:refresh_symbols()
     if not self:visible() then
@@ -3241,43 +3251,24 @@ end
 
 --- API ----
 
-
+M.a = a
 M.api = {}
-
-local apisupport_getsidebar = function()
-    local win = vim.api.nvim_get_current_win()
-    return context.sidebars:get_sidebar_for_win(win)
-end
-
-function M.api.action(act)
-    vim.validate({ act = { act, "string" } })
-    local sidebar = apisupport_getsidebar()
-    if sidebar ~= nil and sidebar_actions[act] ~= nil then
-        sidebar_actions[act](sidebar)
-    end
-end
-
--- TODO: allow the user to await until refresh symbols is done
--- function M.api.refresh_symbols()
---     local sidebar = apisupport_getsidebar()
---     if sidebar ~= nil then
---         sidebar:force_refresh_symbols()
---     end
--- end
 
 ---@param win integer?
 ---@return symbols.SidebarId
-function M.api.get_sidebar(win)
+function M.api.sidebar_get(win)
     win = win or vim.api.nvim_get_current_win()
     return get_sidebar(context, win).id
 end
 
 local function warn_missing_sidebar(sb)
-    log.warn(string.format("Sidebar with id: %d not found", sb))
+    log.warn("Sidebar with id: " .. tostring(sb) .. " not found")
 end
 
----@param f fun(sidebar: Sidebar, ...)
----@return fun(sb: symbols.SidebarId, ...): ...
+---@generic R
+---@generic V...
+---@param f fun(sidebar: Sidebar, V...): R?
+---@return fun(sb: symbols.SidebarId, V...): R?
 local function api_require_sidebar(f)
     return function(sb, ...)
         if sb == nil then
@@ -3290,17 +3281,8 @@ local function api_require_sidebar(f)
         else
             f(sidebar, ...)
         end
-
     end
 end
-
-
-local function await_async_fn(async_fn, ...)
-    local co = coroutine.running()
-    async_fn(function(...) coroutine.resume(co, ...) end, ...)
-    return coroutine.yield()
-end
-
 
 -- TODO: add set debug mode fun
 
@@ -3316,7 +3298,7 @@ end
 M.api.sidebar_open = api_require_sidebar(
     function(sidebar)
         sidebar:open()
-        sidebar:refresh_symbols()
+        -- a.wait(sidebar:refresh_symbols())
     end
 )
 M.api.sidebar_close = api_require_sidebar(Sidebar.close)
@@ -3341,6 +3323,12 @@ M.api.sidebar_set_auto_resize = api_require_sidebar(
         end
     end
 )
+M.api.sidebar_get_auto_resize = api_require_sidebar(
+    ---@return boolean
+    function(sidebar)
+        return sidebar.auto_resize.enabled
+    end
+)
 
 M.api.sidebar_get_auto_resize = api_require_sidebar(
     ---@return boolean
@@ -3350,9 +3338,9 @@ M.api.sidebar_get_auto_resize = api_require_sidebar(
 )
 
 M.api.sidebar_set_max_width = api_require_sidebar(
-    ---@param width integer
-    function(sidebar, width)
-        sidebar.auto_resize.max_width = width
+    ---@param max_width integer
+    function(sidebar, max_width)
+        sidebar.auto_resize.max_width = max_width
         if sidebar.auto_resize.enabled then
             sidebar:refresh_size()
         end
@@ -3369,8 +3357,8 @@ M.api.sidebar_get_max_width = api_require_sidebar(
 
 --- API - Symbols ---
 
-
 M.api.sidebar_symbols_refresh = api_require_sidebar(Sidebar.force_refresh_symbols)
+M.api.sidebar_symbols_refresh_co = a.wrap(api_require_sidebar(Sidebar.force_refresh_symbols))
 
 M.api.sidebar_symbols_fold_all = api_require_sidebar(Sidebar.fold_all)
 M.api.sidebar_symbols_unfold_all = api_require_sidebar(Sidebar.unfold_all)

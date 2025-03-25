@@ -361,38 +361,66 @@ Default config below.
 }
 ```
 
-# API
+# Types
 
-There is now a (currently very simple) API available to control the Sidebar from LUA
+##### `Symbols.SidebarView: "symbols" | "search"`
 
-```lua
-  ---perform any action defined in SidebarAction
-  ---@param act SidebarAction[]
-  action = function(act)
-    local sidebar = apisupport_getsidebar()
-    if sidebar ~= nil and sidebar_actions[act] ~= nil then
-      sidebar_actions[act](sidebar)
-    end
-  end,
-  ---manually refresh the symbols in the current sidebar
-  refresh_symbols = function()
-    local sidebar = apisupport_getsidebar()
-    if sidebar ~= nil then
-      sidebar:refresh_symbols()
-    end
-  end
-```
-The available actions can be obtained by calling
+# Module
 
-```lua
-=require("symbols.config").SidebarAction
-```
+Note: on setup a global variable `Symbols` is created which is equal to the result of `require("symbols")`.
 
-For example, to unfold the entire tree you would call:
+##### `Symbols.FILE_TYPE_MAIN`
+File type set for the buffer used in the main view - list of symbols.
+
+##### `Symbols.FILE_TYPE_SEARCH`
+File type set for the buffer used in search view.
+
+##### `Symbols.FILE_TYPE_HELP`
+File type set for the buffer used when displaying help.
+
+## async
+
+##### `Symbols.a.sync`
+##### `Symbols.a.wait`
+
+Example usage. Code snippet below will open a sidebar for current window with all symbols unfolded.
+Async is needed to make sure that we unfold symbols only once they are available.
 
 ```lua
-require("symbols").api.action("unfold-all")
+local symbols = require("symbols")
+local a = symbols.a
+a.sync(function()
+    local sb = symbols.api.get_sidebar()
+    a.wait(symbols.api.sidebar_symbols_refresh_co(sb))
+    symbols.api.sidebar_symbols_unfold_all(sb)
+    symbols.api.sidebar_open(sb)
+end)()
 ```
+
+## API
+
+##### `Symbols.api.set_log_level(level: integer)`
+
+### Sidebar
+
+##### `Symbols.api.sidebar_get(win: integer?): symbols.SidebarId`
+##### `Symbols.api.sidebar_open(sb: symbols.SidebarId)`
+##### `Symbols.api.sidebar_close(sb: symbols.SidebarId)`
+##### `Symbols.api.sidebar_visible(sb: symbols.SidebarId): boolean`
+
+##### `Symbols.api.sidebar_change_view(sb: symbols.SidebarId, view: symbols.SidebarView)`
+
+##### `Symbols.api.sidebar_set_auto_resize(sb: symbols.SidebarId, auto_resize: boolean)`
+##### `Symbols.api.sidebar_get_auto_resize(sb: symbols.SidebarId): boolean`
+
+##### `Symbols.api.sidebar_set_max_width(sb: symbols.SidebarId, max_width: integer)`
+##### `Symbols.api.sidebar_get_max_width(sb: symbols.SidebarId): integer`
+
+#### Symbols
+
+
+
+
 
 # Alternatives
 
