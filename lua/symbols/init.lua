@@ -2073,16 +2073,6 @@ function Sidebar:refresh_symbols(callback)
     end
 end
 
-function Sidebar:refresh_symbols()
-    if not self:visible() then
-        log.trace("Skipping")
-        return
-    else
-        log.trace("Refreshing")
-    end
-    self:force_refresh_symbols()
-end
-
 ---@param symbols Symbols
 ---@param start_symbol Symbol
 ---@param value boolean
@@ -3371,17 +3361,8 @@ M.api.sidebar_set_auto_resize = api_require_sidebar(
 =======
             f(sidebar, ...)
         end
-
     end
 end
-
-
-local function await_async_fn(async_fn, ...)
-    local co = coroutine.running()
-    async_fn(function(...) coroutine.resume(co, ...) end, ...)
-    return coroutine.yield()
-end
-
 
 -- TODO: add set debug mode fun
 
@@ -3397,7 +3378,7 @@ end
 M.api.sidebar_open = api_require_sidebar(
     function(sidebar)
         sidebar:open()
-        sidebar:refresh_symbols()
+        -- a.wait(sidebar:refresh_symbols())
     end
 )
 M.api.sidebar_close = api_require_sidebar(Sidebar.close)
@@ -3420,6 +3401,12 @@ M.api.sidebar_set_auto_resize = api_require_sidebar(
         if sidebar.auto_resize.enabled then
             sidebar:schedule_refresh_size()
         end
+    end
+)
+M.api.sidebar_get_auto_resize = api_require_sidebar(
+    ---@return boolean
+    function(sidebar)
+        return sidebar.auto_resize.enabled
     end
 )
 
