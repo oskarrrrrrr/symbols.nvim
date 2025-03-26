@@ -1855,6 +1855,7 @@ end
 ---@param buf integer
 ---@param start_line integer zero-indexed
 ---@param details string[]
+---@param hl string
 local function buf_add_inline_details(buf, start_line, details, hl)
     for line, detail in ipairs(details) do
         vim.api.nvim_buf_set_extmark(
