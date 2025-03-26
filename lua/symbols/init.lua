@@ -1860,7 +1860,7 @@ local function buf_add_inline_details(buf, start_line, details, hl)
         vim.api.nvim_buf_set_extmark(
             buf, SIDEBAR_EXT_NS, start_line + line - 1, -1,
             {
-                virt_text = { { detail, hl or "Comment" } },  -- TODO: hl group for inline text
+                virt_text = { { detail, hl } },
                 virt_text_pos = "eol",
                 hl_mode = "combine",
             }
