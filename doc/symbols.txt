@@ -15,8 +15,11 @@ Table of Contents                                  *symbols-table-of-contents*
 5. Commands                                                 |symbols-commands|
 6. Configuration                                       |symbols-configuration|
   - Reference                                |symbols-configuration-reference|
-7. API                                                           |symbols-api|
-8. Alternatives                                         |symbols-alternatives|
+7. Types                                                       |symbols-types|
+8. Module                                                     |symbols-module|
+  - async                                               |symbols-module-async|
+  - API                                                   |symbols-module-api|
+9. Alternatives                                         |symbols-alternatives|
 
 ==============================================================================
 1. Requirements                                         *symbols-requirements*
@@ -378,44 +381,93 @@ Default config below.
 
 
 ==============================================================================
-7. API                                                           *symbols-api*
+7. Types                                                       *symbols-types*
 
-There is now a (currently very simple) API available to control the Sidebar
-from LUA
 
->lua
-      ---perform any action defined in SidebarAction
-      ---@param act SidebarAction[]
-      action = function(act)
-        local sidebar = apisupport_getsidebar()
-        if sidebar ~= nil and sidebar_actions[act] ~= nil then
-          sidebar_actions[act](sidebar)
-        end
-      end,
-      ---manually refresh the symbols in the current sidebar
-      refresh_symbols = function()
-        local sidebar = apisupport_getsidebar()
-        if sidebar ~= nil then
-          sidebar:refresh_symbols()
-        end
-      end
-<
-
-The available actions can be obtained by calling
-
->lua
-    =require("symbols.config").SidebarAction
-<
-
-For example, to unfold the entire tree you would call:
-
->lua
-    require("symbols").api.action("unfold-all")
-<
+SYMBOLS.SIDEBARVIEW: "SYMBOLS" | "SEARCH"
 
 
 ==============================================================================
-8. Alternatives                                         *symbols-alternatives*
+8. Module                                                     *symbols-module*
+
+Note: on setup a global variable `Symbols` is created which is equal to the
+result of `require("symbols")`.
+
+
+SYMBOLS.FILE_TYPE_MAIN
+
+File type set for the buffer used in the main view - list of symbols.
+
+
+SYMBOLS.FILE_TYPE_SEARCH
+
+File type set for the buffer used in search view.
+
+
+SYMBOLS.FILE_TYPE_HELP
+
+File type set for the buffer used when displaying help.
+
+
+ASYNC                                                   *symbols-module-async*
+
+
+SYMBOLS.A.SYNC
+
+
+SYMBOLS.A.WAIT
+
+>lua
+    local symbols = require("symbols")
+    local a = symbols.a
+    a.sync(function()
+        local sb = symbols.api.get_sidebar()
+        a.wait(symbols.api.sidebar_open(sb))
+        symbols.api.sidebar_symbols_unfold_all(sb)
+    end)()
+<
+
+
+API                                                       *symbols-module-api*
+
+
+SYMBOLS.API.SET_LOG_LEVEL(LEVEL: INTEGER)
+
+
+SIDEBAR ~
+
+
+SYMBOLS.API.SIDEBAR_GET(WIN: INTEGER?): SYMBOLS.SIDEBARID
+
+
+SYMBOLS.API.SIDEBAR_OPEN(SB: SYMBOLS.SIDEBARID)
+
+
+SYMBOLS.API.SIDEBAR_CLOSE(SB: SYMBOLS.SIDEBARID)
+
+
+SYMBOLS.API.SIDEBAR_VISIBLE(SB: SYMBOLS.SIDEBARID): BOOLEAN
+
+
+SYMBOLS.API.SIDEBAR_CHANGE_VIEW(SB: SYMBOLS.SIDEBARID, VIEW: SYMBOLS.SIDEBARVIEW)
+
+
+SYMBOLS.API.SIDEBAR_SET_AUTO_RESIZE(SB: SYMBOLS.SIDEBARID, AUTO_RESIZE: BOOLEAN)
+
+
+SYMBOLS.API.SIDEBAR_SET_MAX_WIDTH(SB: SYMBOLS.SIDEBARID, MAX_WIDTH: INTEGER)
+
+
+SYMBOLS.API.SIDEBAR_GET_MAX_WIDTH(SB: SYMBOLS.SIDEBARID): INTEGER
+
+
+SYMBOLS
+
+….
+
+
+==============================================================================
+9. Alternatives                                         *symbols-alternatives*
 
 - aerial.nvim <https://github.com/stevearc/aerial.nvim>
 - outline.nvim <https://github.com/hedyhli/outline.nvim>
