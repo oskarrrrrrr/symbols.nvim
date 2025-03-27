@@ -1223,6 +1223,7 @@ end
 ---@field show_guide_lines boolean
 ---@field wrap boolean
 ---@field unfold_on_goto boolean
+---@field hl_details string
 ---@field auto_resize AutoResizeConfig
 ---@field fixed_width integer
 ---@field keymaps KeymapsConfig
@@ -1333,6 +1334,7 @@ function Sidebar:new()
         show_guide_lines = false,
         wrap = false,
         unfold_on_goto = config.unfold_on_goto,
+        hl_details = config.hl_details,
         auto_resize = vim.deepcopy(config.auto_resize, true),
         fixed_width = config.fixed_width,
         keymaps = config.keymaps,
@@ -1865,15 +1867,18 @@ local function get_display_lines(ctx, line_nr, symbol, recurse)
 
         if state.visible_children > 0 then
             if ctx.show_guide_lines then
-                local hl = nvim.Highlight:new({ group = ctx.chars.hl, line = line_nr + #result.lines, col_start = 1, col_end = line_len })
+                local hl = nvim.Highlight:new({ group = ctx.chars.hl_guides, line = line_nr + #result.lines, col_start = 1, col_end = line_len })
                 table.insert(result.highlights, hl)
             end
+            local fm_col_pos = line_len
             line_add(((state.folded and ctx.chars.folded) or ctx.chars.unfolded) .. " ")
+            local hltop = nvim.Highlight:new({ group = ctx.chars.hl_foldmarker, line = line_nr + #result.lines, col_start = fm_col_pos, col_end = line_len })
+            table.insert(result.highlights, hltop)
         elseif ctx.show_guide_lines and symbol.level > 1 then
             line_add(
                 ((symbol_is_last_child(symbol) and ctx.chars.guide_last_item) or ctx.chars.guide_middle_item) .. " "
             )
-            local hl = nvim.Highlight:new({ group = ctx.chars.hl, line = line_nr + #result.lines, col_start = 1, col_end = line_len })
+            local hl = nvim.Highlight:new({ group = ctx.chars.hl_guides, line = line_nr + #result.lines, col_start = 1, col_end = line_len })
             table.insert(result.highlights, hl)
         else
             local space = (symbol.level == 1 and ctx.using_folds) and "  " or " "
@@ -1935,12 +1940,13 @@ end
 ---@param buf integer
 ---@param start_line integer zero-indexed
 ---@param details string[]
-local function buf_add_inline_details(buf, start_line, details)
+---@param hl string
+local function buf_add_inline_details(buf, start_line, details, hl)
     for line, detail in ipairs(details) do
         vim.api.nvim_buf_set_extmark(
             buf, SIDEBAR_EXT_NS, start_line + line - 1, -1,
             {
-                virt_text = { { detail, "Comment" } },
+                virt_text = { { detail, hl } },
                 virt_text_pos = "eol",
                 hl_mode = "combine",
             }
@@ -1957,7 +1963,7 @@ function Sidebar:refresh_view()
     vim.api.nvim_buf_clear_namespace(self.buf, SIDEBAR_EXT_NS, 0, -1)
     nvim.buf_set_content(self.buf, result.lines)
     buf_add_highlights(self.buf, result.highlights)
-    buf_add_inline_details(self.buf, 0, result.inline_details)
+    buf_add_inline_details(self.buf, 0, result.inline_details, self.hl_details)
 
     self:refresh_size()
 end
@@ -2204,7 +2210,7 @@ function Sidebar:set_cursor_at_symbol(target, unfold)
         nvim.buf_set_modifiable(self.buf, false)
 
         buf_add_highlights(self.buf, result.highlights)
-        buf_add_inline_details(self.buf, top_level_ancestor_line-1, result.inline_details)
+        buf_add_inline_details(self.buf, top_level_ancestor_line-1, result.inline_details, self.hl_details)
     end
 
     nvim.win_set_cursor(self.win, current_line, 0)
@@ -2351,7 +2357,7 @@ function Sidebar:_unfold(symbol, symbol_line)
     nvim.buf_set_modifiable(self.buf, false)
 
     buf_add_highlights(self.buf, result.highlights)
-    buf_add_inline_details(self.buf, symbol_line-1, result.inline_details)
+    buf_add_inline_details(self.buf, symbol_line-1, result.inline_details, self.hl_details)
 
     self:set_cursor_at_symbol(symbol, false)
     self:schedule_refresh_size()
@@ -2384,7 +2390,7 @@ function Sidebar:_fold(symbol, symbol_line, symbol_line_count)
     nvim.buf_set_modifiable(self.buf, false)
 
     buf_add_highlights(self.buf, result.highlights)
-    buf_add_inline_details(self.buf, symbol_line-1, result.inline_details)
+    buf_add_inline_details(self.buf, symbol_line-1, result.inline_details, self.hl_details)
 
     self:set_cursor_at_symbol(symbol, false)
     self:schedule_refresh_size()
@@ -2425,7 +2431,7 @@ function Sidebar:unfold_recursively()
     nvim.buf_set_modifiable(self.buf, false)
 
     buf_add_highlights(self.buf, result.highlights)
-    buf_add_inline_details(self.buf, cursor_line-1, result.inline_details)
+    buf_add_inline_details(self.buf, cursor_line-1, result.inline_details, self.hl_details)
 
     self:set_cursor_at_symbol(symbol, false)
     self:schedule_refresh_size()
@@ -2563,7 +2569,7 @@ function Sidebar:inline_details_show()
         local ctx = DisplayContext:new(self)
         local symbols = self:current_symbols()
         local details = get_inline_details(ctx, symbols.root, true)
-        buf_add_inline_details(self.buf, 0, details)
+        buf_add_inline_details(self.buf, 0, details, self.hl_details)
     end
 end
 
@@ -2873,6 +2879,7 @@ local function sidebar_new(sidebar, ctx, win)
     sidebar.auto_peek = config.auto_peek
     sidebar.close_on_goto = config.close_on_goto
     sidebar.unfold_on_goto = config.unfold_on_goto
+    sidebar.hl_details = config.hl_details
 
     sidebar.buf = vim.api.nvim_create_buf(false, true)
     nvim.buf_set_modifiable(sidebar.buf, false)

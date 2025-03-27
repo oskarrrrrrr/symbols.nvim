@@ -214,8 +214,13 @@ Default config below.
             guide_middle_item = "├",
             guide_last_item = "└",
             -- use this highlight group for the guide lines
-            hl = "Comment"
+            hl_guides = "Comment",
+            -- use this highlight group for the collapse/expand markers
+            hl_foldmarker = "String"
         },
+        -- highlight group for the inline details shown next to the symbol name
+        -- (provider - dependent)
+        hl_details = "Comment",
         -- Config for the preview window.
         preview = {
             -- Whether the preview window is always opened when the sidebar is
