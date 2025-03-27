@@ -47,7 +47,7 @@ Using lazy.nvim:
 > **Warning**
 >
 > The main branch is used for development and may introduce breaking changes without warning.
-> For a more stable experience use tags (e.g. "v0.1.0") with you plugin manager.
+> For a more stable experience use tags with you plugin manager.
 
 # Supported Languages
 
