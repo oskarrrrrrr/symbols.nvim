@@ -9,7 +9,7 @@ local M = {}
 ---@field hl_guides string
 ---@field hl_foldmarker string
 
----@enum SidebarAction
+---@enum symbols.SidebarAction
 M.SidebarAction = {
     GotoSymbol = "goto-symbol",
     PeekSymbol = "peek-symbol",
@@ -44,7 +44,7 @@ M.SidebarAction = {
     Close = "close",
 }
 
----@alias KeymapsConfig table<string, SidebarAction?>
+---@alias KeymapsConfig table<string, symbols.SidebarAction?>
 
 ---@enum DevAction
 M.DevAction = {
@@ -136,12 +136,12 @@ M.OpenDirection = {
 ---@field lsp LspConfig
 ---@field treesitter TreesitterConfig
 
----@class Config
+---@class symbols.Config
 ---@field sidebar SidebarConfig
 ---@field providers ProvidersConfig
 ---@field dev DevConfig
 
----@type Config
+---@type symbols.Config
 M.default = {
     sidebar = {
         hide_cursor = true,
@@ -330,7 +330,7 @@ M.default = {
 }
 
 ---@param ... table
----@return Config
+---@return symbols.Config
 function M.prepare_config(...)
     local function extend_from_default(cfg)
         for ft, _ in pairs(cfg) do

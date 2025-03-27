@@ -47,7 +47,7 @@ Using lazy.nvim:
 > **Warning**
 >
 > The main branch is used for development and may introduce breaking changes without warning.
-> For a more stable experience use tags (e.g. "v0.1.0") with you plugin manager.
+> For a more stable experience use tags with you plugin manager.
 
 # Supported Languages
 
@@ -366,39 +366,59 @@ Default config below.
 }
 ```
 
-# API
+# Types
 
-There is now a (currently very simple) API available to control the Sidebar from LUA
+##### `Symbols.SidebarView: "symbols" | "search"`
 
-```lua
-  ---perform any action defined in SidebarAction
-  ---@param act SidebarAction[]
-  action = function(act)
-    vim.validate({ act = { act, "string" } })
-    local sidebar = apisupport_getsidebar()
-    if sidebar ~= nil and sidebar_actions[act] ~= nil then
-      sidebar_actions[act](sidebar)
-    end
-  end,
-  ---manually refresh the symbols in the current sidebar
-  refresh_symbols = function()
-    local sidebar = apisupport_getsidebar()
-    if sidebar ~= nil then
-      sidebar:refresh_symbols()
-    end
-  end
-```
-The available actions can be obtained by calling
+# Module
+
+Note: on setup a global variable `Symbols` is created which is equal to the result of `require("symbols")`.
+
+##### `Symbols.FILE_TYPE_MAIN`
+File type set for the buffer used in the main view - list of symbols.
+
+##### `Symbols.FILE_TYPE_SEARCH`
+File type set for the buffer used in search view.
+
+##### `Symbols.FILE_TYPE_HELP`
+File type set for the buffer used when displaying help.
+
+## async
+
+##### `Symbols.a.sync`
+##### `Symbols.a.wait`
 
 ```lua
-=require("symbols.config").SidebarAction
+local symbols = require("symbols")
+local a = symbols.a
+a.sync(function()
+    local sb = symbols.api.get_sidebar()
+    a.wait(symbols.api.sidebar_open(sb))
+    symbols.api.sidebar_symbols_unfold_all(sb)
+end)()
 ```
 
-For example, to unfold the entire tree you would call:
+## API
 
-```lua
-require("symbols").api.action("unfold-all")
-```
+##### `Symbols.api.set_log_level(level: integer)`
+
+### Sidebar
+
+##### `Symbols.api.sidebar_get(win: integer?): symbols.SidebarId`
+##### `Symbols.api.sidebar_open(sb: symbols.SidebarId)`
+##### `Symbols.api.sidebar_close(sb: symbols.SidebarId)`
+##### `Symbols.api.sidebar_visible(sb: symbols.SidebarId): boolean`
+
+##### `Symbols.api.sidebar_change_view(sb: symbols.SidebarId, view: symbols.SidebarView)`
+
+##### `Symbols.api.sidebar_set_auto_resize(sb: symbols.SidebarId, auto_resize: boolean)`
+
+##### `Symbols.api.sidebar_set_max_width(sb: symbols.SidebarId, max_width: integer)`
+##### `Symbols.api.sidebar_get_max_width(sb: symbols.SidebarId): integer`
+
+#### Symbols
+
+....
 
 # Alternatives
 
