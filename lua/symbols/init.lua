@@ -1214,6 +1214,7 @@ end
 ---@field symbols_retriever symbols.SymbolsRetriever
 ---@field buf_symbols table<integer, Symbols>
 ---@field symbol_display_config table<string, SymbolDisplayConfig>
+---@field symbols_need_refreshing boolean
 ---@field preview_config PreviewConfig
 ---@field preview Preview
 ---@field details DetailsWin
@@ -1322,6 +1323,7 @@ function Sidebar:new()
         symbols_retriever = nil, ---@diagnostic disable-line
         symbols_cache = SymbolsCache_new(),
         buf_symbols = vim.defaulttable(Symbols_new),
+        symbols_need_refreshing = true,
         symbol_display_config = {},
         preview_config = config.preview,
         preview = Preview:new(),
@@ -1382,7 +1384,7 @@ function Sidebar:change_view(new_view)
 end
 
 ---@param root Symbol
----@param pos Pos
+---@param pos Pos # row and column zero-indexed
 ---@return Symbol
 local function symbol_at_pos(root, pos)
 
@@ -2009,6 +2011,7 @@ function Sidebar:force_refresh_symbols(callback)
         Symbols_apply_filter(new_symbols, symbols_filter)
         self:replace_current_symbols(new_symbols)
         self:refresh_view()
+        self.symbols_need_refreshing = false
         callback()
     end
 
@@ -2049,16 +2052,19 @@ function Sidebar:force_refresh_symbols(callback)
     end
 end
 
-Sidebar.force_refresh_symbols_co = a.wrap(Sidebar.force_refresh_symbols)
-
-function Sidebar:refresh_symbols()
+---@param callback fun() | nil
+function Sidebar:refresh_symbols(callback)
+    callback = callback or function(...) end
     if not self:visible() then
-        log.trace("Skipping")
+        self.symbols_need_refreshing = true
+        callback()
         return
-    else
-        log.trace("Refreshing")
     end
-    self:force_refresh_symbols()
+    if self.symbols_need_refreshing then
+        self:force_refresh_symbols(callback)
+    else
+        callback()
+    end
 end
 
 ---@param symbols Symbols
@@ -2358,7 +2364,9 @@ function Sidebar:unfold()
     local cursor_line = vim.api.nvim_win_get_cursor(self.win)[1]
     state.folded = false
 
+    local original_window = vim.api.nvim_get_current_win()
     self:_unfold(symbol, cursor_line)
+    vim.api.nvim_set_current_win(original_window)
 end
 
 ---@param symbol Symbol
@@ -2820,6 +2828,18 @@ function Sidebar:on_scroll()
     end
 end
 
+function Sidebar:set_cursor_at_symbol_from_source()
+    if (
+        not self.cursor_follow or
+        not self:visible() or
+        self.current_view ~= "symbols"
+    ) then return end
+    local symbols = self:current_symbols()
+    local pos = Pos_from_point(vim.api.nvim_win_get_cursor(self.source_win))
+    local symbol = symbol_at_pos(symbols.root, pos)
+    self:set_cursor_at_symbol(symbol, false)
+end
+
 ---@param ctx symbols.Context
 local function sidebar_new(sidebar, ctx, win)
     local config = ctx.config.sidebar
@@ -2877,25 +2897,15 @@ local function sidebar_new(sidebar, ctx, win)
         }
     )
 
-    local cursor_follow = function()
-        if (
-            not sidebar.cursor_follow or
-            not sidebar:visible() or
-            sidebar.current_view ~= "symbols"
-        ) then return end
-        local win = vim.api.nvim_get_current_win()
-        if win ~= sidebar.source_win then return end
-        local symbols = sidebar:current_symbols()
-        local pos = Pos_from_point(vim.api.nvim_win_get_cursor(sidebar.source_win))
-        local symbol = symbol_at_pos(symbols.root, pos)
-        sidebar:set_cursor_at_symbol(symbol, false)
-    end
-
     vim.api.nvim_create_autocmd(
         { "CursorMoved" },
         {
             group = global_autocmd_group,
-            callback = cursor_follow,
+            callback = function()
+                local win = vim.api.nvim_get_current_win()
+                if win ~= sidebar.source_win then return end
+                sidebar:set_cursor_at_symbol_from_source()
+            end
         }
     )
 
@@ -3166,6 +3176,7 @@ local function setup_autocommands(ctx)
                 local source_buf = t.buf
                 for _, sidebar in ipairs(ctx.sidebars.sidebars) do
                     if sidebar:source_win_buf() == source_buf then
+                        sidebar.symbols_need_refreshing = true
                         sidebar:refresh_symbols()
                     end
                 end
@@ -3279,12 +3290,10 @@ local function api_require_sidebar(f)
         if sidebar == nil then
             warn_missing_sidebar(sb)
         else
-            f(sidebar, ...)
+            return f(sidebar, ...)
         end
     end
 end
-
--- TODO: add set debug mode fun
 
 ---@param level integer
 function M.api.set_log_level(level)
@@ -3294,24 +3303,45 @@ end
 --- API - Sidebar ---
 
 -- TODO: add options
--- TODO: refresh symbols only if not already refreshed
-M.api.sidebar_open = api_require_sidebar(
-    function(sidebar)
+M.api.sidebar_open = a.wrap(api_require_sidebar(
+    function(sidebar, callback)
         sidebar:open()
-        -- a.wait(sidebar:refresh_symbols())
+        sidebar:refresh_symbols(callback)
     end
-)
+))
+
 M.api.sidebar_close = api_require_sidebar(Sidebar.close)
+
+---@param except symbols.SidebarId[]?
+M.api.sidebar_close_all = function(except)
+    except = except or {}
+    for _, sb in ipairs(context.sidebars.sidebars) do
+        if (
+            not sb.deleted
+            and sb:visible()
+            and not vim.list_contains(except, sb.id)
+        ) then
+            sb:close()
+        end
+    end
+end
+
 M.api.sidebar_visible = api_require_sidebar(Sidebar.visible)
-M.api.sidebar_set_current_win = api_require_sidebar(
+
+M.api.sidebar_win = api_require_sidebar(
+    function(sidebar) return sidebar.win end
+)
+M.api.sidebar_win_source = api_require_sidebar(
+    function(sidebar) return sidebar.source_win end
+)
+
+M.api.sidebar_focus = api_require_sidebar(
     function(sidebar) vim.api.nvim_set_current_win(sidebar.win) end
 )
-M.api.sidebar_source_set_current_win = api_require_sidebar(
+M.api.sidebar_focus_source = api_require_sidebar(
     function(sidebar) vim.api.nvim_set_current_win(sidebar.source_win) end
 )
 
-
--- TODO: validate view
 M.api.sidebar_change_view = api_require_sidebar(Sidebar.change_view)
 
 M.api.sidebar_set_auto_resize = api_require_sidebar(
@@ -3321,19 +3351,6 @@ M.api.sidebar_set_auto_resize = api_require_sidebar(
         if sidebar.auto_resize.enabled then
             sidebar:schedule_refresh_size()
         end
-    end
-)
-M.api.sidebar_get_auto_resize = api_require_sidebar(
-    ---@return boolean
-    function(sidebar)
-        return sidebar.auto_resize.enabled
-    end
-)
-
-M.api.sidebar_get_auto_resize = api_require_sidebar(
-    ---@return boolean
-    function(sidebar)
-        return sidebar.auto_resize.enabled
     end
 )
 
@@ -3357,23 +3374,38 @@ M.api.sidebar_get_max_width = api_require_sidebar(
 
 --- API - Symbols ---
 
-M.api.sidebar_symbols_refresh = api_require_sidebar(Sidebar.force_refresh_symbols)
-M.api.sidebar_symbols_refresh_co = a.wrap(api_require_sidebar(Sidebar.force_refresh_symbols))
+M.api.sidebar_symbols_force_refresh = a.wrap(api_require_sidebar(Sidebar.force_refresh_symbols))
 
-M.api.sidebar_symbols_fold_all = api_require_sidebar(Sidebar.fold_all)
-M.api.sidebar_symbols_unfold_all = api_require_sidebar(Sidebar.unfold_all)
+M.api.sidebar_symbols_fold_all = api_require_sidebar(
+    function(sidebar)
+        sidebar:fold_all()
+        if sidebar.cursor_follow then
+            sidebar:set_cursor_at_symbol_from_source()
+        end
+    end
+)
+M.api.sidebar_symbols_unfold_all = api_require_sidebar(
+    function(sidebar)
+        sidebar:unfold_all()
+        if sidebar.cursor_follow then
+            sidebar:set_cursor_at_symbol_from_source()
+        end
+    end
+)
 
 M.api.sidebar_symbols_unfold = api_require_sidebar(
     ---@param levels integer
     function(sidebar, levels)
-        sidebar:_unfold_one_level(levels)
+        sidebar:_unfold_one_level(levels or 1)
+        sidebar:set_cursor_at_symbol_from_source()
     end
 )
 
 M.api.sidebar_symbols_fold = api_require_sidebar(
     ---@param levels integer
     function(sidebar, levels)
-        sidebar:_fold_one_level(levels)
+        sidebar:_fold_one_level(levels or 1)
+        sidebar:set_cursor_at_symbol_from_source()
     end
 )
 
@@ -3385,6 +3417,7 @@ M.api.sidebar_symbols_unfold_current = api_require_sidebar(
         else
             sidebar:unfold()
         end
+        sidebar:set_cursor_at_symbol_from_source()
     end
 )
 
@@ -3396,24 +3429,11 @@ M.api.sidebar_symbols_fold_current = api_require_sidebar(
         else
             sidebar:fold()
         end
+        sidebar:set_cursor_at_symbol_from_source()
     end
 )
 
 M.api.sidebar_symbols_goto_symbol_under_cursor = api_require_sidebar(Sidebar.show_symbol_under_cursor)
-
--- TODO: check if sidebar window is open
--- TODO: check if view is set to symbols
-M.api.sidebar_symbols_preview_open = api_require_sidebar(Sidebar.preview_open)
-M.api.sidebar_symbols_preview_close = api_require_sidebar(
-    function(sidebar) sidebar.preview:close() end
-)
-
-M.api.sidebar_symbols_details_open = api_require_sidebar(
-    function(sidebar) sidebar.details:open() end
-)
-M.api.sidebar_symbols_details_close = api_require_sidebar(
-    function(sidebar) sidebar.details:close() end
-)
 
 M.api.sidebar_symbols_inline_details_show = api_require_sidebar(Sidebar.inline_details_show)
 M.api.sidebar_symbols_inline_details_hide = api_require_sidebar(Sidebar.inline_details_hide)
@@ -3423,50 +3443,25 @@ M.api.sidebar_symbols_goto_parent = api_require_sidebar(Sidebar.goto_parent)
 M.api.sidebar_symbols_goto_next_symbol_at_level = api_require_sidebar(Sidebar.next_symbol_at_level)
 M.api.sidebar_symbols_goto_prev_symbol_at_level = api_require_sidebar(Sidebar.prev_symbol_at_level)
 
+M.api.sidebar_symbols_current_folded = api_require_sidebar(
+    ---@return boolean
+    function(sidebar)
+        local _, state = sidebar:current_symbol()
+        return state.folded
+    end
+)
+
+M.api.sidebar_symbols_current_visible_children = api_require_sidebar(
+    ---@return integer
+    function(sidebar)
+        local _, state = sidebar:current_symbol()
+        return state.visible_children
+    end
+)
+
 M.api.wrap = function(f, ...)
     coroutine.resume(coroutine.create(f), ...)
 end
-
-
--- ? ["goto-symbol"] = Sidebar.goto_symbol,
--- X ["peek-symbol"] = Sidebar.peek,
---
--- X ["open-preview"] = Sidebar.preview_open,
--- X ["open-details-window"] = Sidebar.toggle_show_details,
--- X ["show-symbol-under-cursor"] = Sidebar.show_symbol_under_cursor,
---
--- X ["goto-parent"] = Sidebar.goto_parent,
--- X ["prev-symbol-at-level"] = Sidebar.prev_symbol_at_level,
--- X ["next-symbol-at-level"] = Sidebar.next_symbol_at_level,
---
--- X ["unfold"] = Sidebar.unfold,
--- X ["unfold-recursively"] = Sidebar.unfold_recursively,
--- X ["unfold-one-level"] = Sidebar.unfold_one_level,
--- X ["unfold-all"] = Sidebar.unfold_all,
---
--- X ["fold"] = Sidebar.fold,
--- X ["fold-recursively"] = Sidebar.fold_recursively,
--- X ["fold-one-level"] = Sidebar.fold_one_level,
--- X ["fold-all"] = Sidebar.fold_all,
---
--- X ["search"] = Sidebar.search,
---
--- X ["toggle-fold"] = Sidebar.toggle_fold,
--- X ["toggle-inline-details"] = Sidebar.toggle_details,
--- ["toggle-auto-details-window"] = Sidebar.toggle_auto_details,
--- ["toggle-auto-preview"] = Sidebar.toggle_auto_preview,
--- ["toggle-cursor-hiding"] = Sidebar.toggle_cursor_hiding,
--- ["toggle-cursor-follow"] = Sidebar.toggle_cursor_follow,
--- ["toggle-filters"] = Sidebar.toggle_filters,
--- ["toggle-auto-peek"] = Sidebar.toggle_auto_peek,
--- ["toggle-close-on-goto"] = Sidebar.toggle_close_on_goto,
--- X ["toggle-auto-resize"] = Sidebar.toggle_auto_resize,
--- X ["decrease-max-width"] = Sidebar.decrease_max_width,
--- X ["increase-max-width"] = Sidebar.increase_max_width,
---
--- ? ["help"] = Sidebar.help,
--- X ["close"] = Sidebar.close,
-
 
 ---@param name string
 ---@return boolean
