@@ -388,7 +388,9 @@ Default config below.
 7. Types                                                       *symbols-types*
 
 
+
 SYMBOLS.SIDEBARVIEW: "SYMBOLS" | "SEARCH"
+
 
 
 ==============================================================================
