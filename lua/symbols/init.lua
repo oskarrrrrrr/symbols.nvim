@@ -3358,55 +3358,6 @@ M.api.sidebar_set_auto_resize = api_require_sidebar(
         if sidebar.auto_resize.enabled then
             sidebar:schedule_refresh_size()
         end
-=======
-            f(sidebar, ...)
-        end
-    end
-end
-
--- TODO: add set debug mode fun
-
----@param level integer
-function M.api.set_log_level(level)
-    log.LOG_LEVEL = level
-end
-
---- API - Sidebar ---
-
--- TODO: add options
--- TODO: refresh symbols only if not already refreshed
-M.api.sidebar_open = api_require_sidebar(
-    function(sidebar)
-        sidebar:open()
-        -- a.wait(sidebar:refresh_symbols())
-    end
-)
-M.api.sidebar_close = api_require_sidebar(Sidebar.close)
-M.api.sidebar_visible = api_require_sidebar(Sidebar.visible)
-M.api.sidebar_set_current_win = api_require_sidebar(
-    function(sidebar) vim.api.nvim_set_current_win(sidebar.win) end
-)
-M.api.sidebar_source_set_current_win = api_require_sidebar(
-    function(sidebar) vim.api.nvim_set_current_win(sidebar.source_win) end
-)
-
-
--- TODO: validate view
-M.api.sidebar_change_view = api_require_sidebar(Sidebar.change_view)
-
-M.api.sidebar_set_auto_resize = api_require_sidebar(
-    ---@param auto_resize boolean
-    function(sidebar, auto_resize)
-        sidebar.auto_resize.enabled = auto_resize
-        if sidebar.auto_resize.enabled then
-            sidebar:schedule_refresh_size()
-        end
-    end
-)
-M.api.sidebar_get_auto_resize = api_require_sidebar(
-    ---@return boolean
-    function(sidebar)
-        return sidebar.auto_resize.enabled
     end
 )
 
