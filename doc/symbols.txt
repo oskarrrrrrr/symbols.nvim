@@ -435,15 +435,26 @@ SYMBOLS.A.WAIT
 API                                                       *symbols-module-api*
 
 
+  **Warning**
+  API is experimental for now. There might be breaking changes without additional
+  warnings.
+
 SYMBOLS.API.SET_LOG_LEVEL(LEVEL: INTEGER)
 
 
 SIDEBAR ~
 
-`Symbols.api.sidebar_get(win: integer?): symbols.SidebarId`
-`Symbols.api.sidebar_open(sb: symbols.SidebarId)`
-`Symbols.api.sidebar_close(sb: symbols.SidebarId)`
-`Symbols.api.sidebar_visible(sb: symbols.SidebarId): boolean`
+
+SYMBOLS.API.SIDEBAR_GET(WIN: INTEGER?): SYMBOLS.SIDEBARID
+
+
+SYMBOLS.API.SIDEBAR_OPEN(SB: SYMBOLS.SIDEBARID)
+
+
+SYMBOLS.API.SIDEBAR_CLOSE(SB: SYMBOLS.SIDEBARID)
+
+
+SYMBOLS.API.SIDEBAR_VISIBLE(SB: SYMBOLS.SIDEBARID): BOOLEAN
 
 
 SYMBOLS.API.SIDEBAR_CHANGE_VIEW(SB: SYMBOLS.SIDEBARID, VIEW: SYMBOLS.SIDEBARVIEW)
