@@ -400,6 +400,10 @@ end)()
 
 ## API
 
+> **Warning**
+>
+> API is experimental for now. There might be breaking changes without additional warnings.
+
 ##### `Symbols.api.set_log_level(level: integer)`
 
 ### Sidebar

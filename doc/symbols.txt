@@ -388,9 +388,7 @@ Default config below.
 7. Types                                                       *symbols-types*
 
 
-
 SYMBOLS.SIDEBARVIEW: "SYMBOLS" | "SEARCH"
-
 
 
 ==============================================================================
@@ -442,17 +440,10 @@ SYMBOLS.API.SET_LOG_LEVEL(LEVEL: INTEGER)
 
 SIDEBAR ~
 
-
-SYMBOLS.API.SIDEBAR_GET(WIN: INTEGER?): SYMBOLS.SIDEBARID
-
-
-SYMBOLS.API.SIDEBAR_OPEN(SB: SYMBOLS.SIDEBARID)
-
-
-SYMBOLS.API.SIDEBAR_CLOSE(SB: SYMBOLS.SIDEBARID)
-
-
-SYMBOLS.API.SIDEBAR_VISIBLE(SB: SYMBOLS.SIDEBARID): BOOLEAN
+`Symbols.api.sidebar_get(win: integer?): symbols.SidebarId`
+`Symbols.api.sidebar_open(sb: symbols.SidebarId)`
+`Symbols.api.sidebar_close(sb: symbols.SidebarId)`
+`Symbols.api.sidebar_visible(sb: symbols.SidebarId): boolean`
 
 
 SYMBOLS.API.SIDEBAR_CHANGE_VIEW(SB: SYMBOLS.SIDEBARID, VIEW: SYMBOLS.SIDEBARVIEW)
