@@ -17,8 +17,10 @@ Table of Contents                                  *symbols-table-of-contents*
   - Reference                                |symbols-configuration-reference|
 7. Types                                                       |symbols-types|
 8. Module                                                     |symbols-module|
-  - async                                               |symbols-module-async|
-  - API                                                   |symbols-module-api|
+  - Constants                                       |symbols-module-constants|
+  - Dev                                                   |symbols-module-dev|
+  - Async                                               |symbols-module-async|
+  - Sidebar                                           |symbols-module-sidebar|
 9. Alternatives                                         |symbols-alternatives|
 
 ==============================================================================
@@ -394,84 +396,307 @@ SYMBOLS.SIDEBARVIEW: "SYMBOLS" | "SEARCH"
 ==============================================================================
 8. Module                                                     *symbols-module*
 
-Note: on setup a global variable `Symbols` is created which is equal to the
-result of `require("symbols")`.
+
+  **warning** - Lua API is experimental for now. There might be breaking changes
+  without additional warnings.
+A global variable `Symbols` is defined on setup. You can use it instead of
+`require("symbols")`.
 
 
-SYMBOLS.FILE_TYPE_MAIN
+CONSTANTS                                           *symbols-module-constants*
 
-File type set for the buffer used in the main view - list of symbols.
+**Symbols.FILE_TYPE_MAIN**
+
+File type set for the buffer used for symbols tree view.
+
+**Symbols.FILE_TYPE_SEARCH**
+
+File type set for the buffer used for symbols search.
+
+**Symbols.FILE_TYPE_HELP**
+
+File type set for the buffer used to display help.
 
 
-SYMBOLS.FILE_TYPE_SEARCH
+DEV                                                       *symbols-module-dev*
 
-File type set for the buffer used in search view.
+**Symbols.log_level_set(level: integer)**
 
-
-SYMBOLS.FILE_TYPE_HELP
-
-File type set for the buffer used when displaying help.
+Use builtin log levels: `vim.log.levels`.
 
 
 ASYNC                                                   *symbols-module-async*
 
+We expose a simple async library to avoid nested callbacks (aka "callback
+hell"). Note, you probably don’t have to understand exactly how this async
+implementation works. There are some nested functions which can get confusing.
+To save time consider skimming this section but try to understand the examples.
 
-SYMBOLS.A.SYNC
+In this section we refer to wrapped functions, these are the functions wrapped
+with `Symbols.a.wrap`. Wrapped functions can be awaited. Most users probably
+won’t need to wrap any functions themselves.
 
+**Symbols.a.sync(f: fun())**
 
-SYMBOLS.A.WAIT
+Wrapped functions can be a.wait-ed inside a.sync functions.
+
+**Symbols.a.wait(f: fun(callback: fun(R...))): R...**
+
+Runs and waits for a wrapped function to complete. Has to be called within an
+async function. Will return any values passed to the callback function.
+
+**Symbols.a.fire_and_forget(f: fun(callback: fun(...)))**
+
+Calls a wrapped function `f` and continues execution without waiting for it to
+finish. Can be used outside of async functions. Note that it will discard any
+return values.
+
+**Symbols.a.wrap(f: fun(V..., callback: fun(...): ...)): (fun(V...):
+fun(callback: fun(R...): R...))**
+
+This function is used internally to expose awaitable functions. Use it to wrap
+a callback based function and make it awaitable.
+
+Usage Example ~
 
 >lua
-    local symbols = require("symbols")
-    local a = symbols.a
+    local a = Symbols.a
+    
+    -- prints x after t miliseconds and returns x
+    local delayed_print = a.wrap(function(x, t, callback)
+        vim.defer_fn(
+            function()
+                vim.print(x)
+                -- Make sure to call the callback whenever the function is done.
+                -- Otherwise, a.wait will wait indefinitely.
+                --
+                -- Return values can be passed via arguments of the callback.
+                callback(x)
+            end,
+            t
+        )
+    end)
+    
+    -- a.wait-able functions have to be called from a.sync functions
     a.sync(function()
-        local sb = symbols.api.get_sidebar()
-        a.wait(symbols.api.sidebar_open(sb))
-        symbols.api.sidebar_symbols_unfold_all(sb)
-    end)()
+        -- a.fire_and_forget calls delayed_print and continues (without waiting for it to finish).
+        a.fire_and_forget(
+            delayed_print("This should print last.", 1100)
+        )
+    
+        -- a.wait calls delayed_print and waits for it to finish.
+        local s = a.wait(
+            delayed_print("Hellope", 1000)
+        )
+        vim.print("Got return value: " .. s)
+    
+        vim.print("This should print second to last.")
+    end)() -- Important! Remember to call the async function.
+    
+    -- Note that fire_and_forget can be used outside of async functions.
+    a.fire_and_forget(delayed_print("This should print second.", 100))
+    
+    -- While an a.sync function a.wait-s other code will run in the meantine.
+    vim.print("This should print first.")
 <
 
 
-API                                                       *symbols-module-api*
+SIDEBAR                                               *symbols-module-sidebar*
+
+First parameter to most functions in this section is `sb` of type
+`symbols.SidebarId`. It will not be annotated to avoid clutter. Similarly to
+Neovim Lua API, you can use `0` to indicate the current sidebar.
+
+**Symbols.sidebar.get(win: integer?) -> symbols.SidebarId**
+
+Get sidebar for window `win`. Current window will be used if `win` is skipped.
+Passing `win` which is already used by a sidebar is fine and will return its
+id. If there is no sidebar for the given window yet then it will be created but
+not opened.
+
+**Symbols.sidebar.open(sb)**
+
+Wrapped function that opens a sidebar. It’s safe to call when the sidebar is
+already open.
+
+**Symbols.sidebar.close(sb)**
+
+Closes a sidebar.
+
+**Symbols.sidebar.close_all()**
+
+Closes all sidebars (in all tabs).
+
+**Symbols.sidebar.visible(sb): boolean**
+
+Check whether a sidebar is visible (opened).
+
+**Symbols.sidebar.win(sb): integer**
+
+Get the window id of the window in which the sidebar is displayed.
+
+**Symbols.sidebar.win_source(sb): integer**
+
+Get the window id of the window with source code.
+
+**Symbols.sidebar.focus(sb)**
+
+Set current window to sidebar.
+
+**Symbols.sidebar.focus_source(sb)**
+
+Set current window to source code.
+
+**Symbols.sidebar.cursor_hiding_set(hide_cursor: boolean)**
+
+Set cursor hiding. Note this is a global setting so `sb` is not needed.
+
+**Symbols.sidebar.cursor_hiding_toggle()**
+
+Toggle cursor hiding. Note this is a global setting so `sb` is not needed.
+
+**Symbols.sidebar.view_change(sb, view: "search" | "symbols")**
+
+Change sidebar view.
+
+**Symbols.sidebar.auto_resize_set(sb, auto_resize: boolean)**
+
+Enable/disable auto resizing.
+
+**Symbols.sidebar.auto_resize_toggle(sb)**
+
+Toggle auto resizing.
+
+**Symbols.sidebar.auto_resize_get(sb): boolean**
+
+Get auto resize setting.
+
+**Symbols.sidebar.width_min_set(sb, min_width: integer)**
+
+Set minimum width. This setting is relevant only if auto resizing is enabled.
+
+**Symbols.sidebar.width_min_get(sb): integer**
+
+Get minimum width. This setting is relevant only if auto resizing is enabled.
+
+**Symbols.sidebar.width_max_set(sb, max_width: integer)**
+
+Set maximum width. This setting is relevant only if auto resizing is enabled.
+
+**Symbols.sidebar.width_max_get(sb): integer**
+
+Get maximum width. This setting is relevant only if auto resizing is enabled.
+
+**Symbols.sidebar.filters_enabled_set(sb, filters_enabled: boolean)**
+
+Enables/disables all filters.
+
+**Symbols.sidebar.filters_enabled_toggle**
+
+Toggles all filters.
 
 
-  **Warning**
-  API is experimental for now. There might be breaking changes without additional
-  warnings.
+SYMBOLS ~
 
-SYMBOLS.API.SET_LOG_LEVEL(LEVEL: INTEGER)
+**Symbols.sidebar.symbols.force_refresh(sb)**
 
+Wrapped function that fetches symbols from provider (LSP, Treesitter, etc.) and
+renders them in the sidebar.
 
-SIDEBAR ~
+**Symbols.sidebar.symbols.fold_all(sb)**
 
+Folds all symbols.
 
-SYMBOLS.API.SIDEBAR_GET(WIN: INTEGER?): SYMBOLS.SIDEBARID
+**Symbols.sidebar.symbols.unfold_all(sb)**
 
+Unfolds all symbols.
 
-SYMBOLS.API.SIDEBAR_OPEN(SB: SYMBOLS.SIDEBARID)
+**Symbols.sidebar.symbols.unfold(sb, levels: integer?)**
 
+Unfolds by `levels` levels or 1 if argument skipped.
 
-SYMBOLS.API.SIDEBAR_CLOSE(SB: SYMBOLS.SIDEBARID)
+**Symbols.sidebar.symbols.fold(sb, levels: integer?)**
 
+Folds by `levels` levels or 1 if argument skipped.
 
-SYMBOLS.API.SIDEBAR_VISIBLE(SB: SYMBOLS.SIDEBARID): BOOLEAN
+**Symbols.sidebar.symbols.goto_symbol_under_cursor(sb)**
 
+Moves the cursor in the sidebar to the symbol under cursor in the source code
+window. Doesn’t change the focused window.
 
-SYMBOLS.API.SIDEBAR_CHANGE_VIEW(SB: SYMBOLS.SIDEBARID, VIEW: SYMBOLS.SIDEBARVIEW)
+**Symbols.sidebar.symbols.inline_details_show_set(sb, show_inline_details:
+boolean)**
 
+Enable/disable inline details.
 
-SYMBOLS.API.SIDEBAR_SET_AUTO_RESIZE(SB: SYMBOLS.SIDEBARID, AUTO_RESIZE: BOOLEAN)
+**Symbols.sidebar.symbols.inline_details_show_toggle(sb)**
 
+Toggle inline details.
 
-SYMBOLS.API.SIDEBAR_SET_MAX_WIDTH(SB: SYMBOLS.SIDEBARID, MAX_WIDTH: INTEGER)
+**Symbols.sidebar.symbols.details_auto_show_set(sb, auto_show_details:
+boolean)**
 
+Enable/disable auto showing of details window.
 
-SYMBOLS.API.SIDEBAR_GET_MAX_WIDTH(SB: SYMBOLS.SIDEBARID): INTEGER
+**Symbols.sidebar.symbols.details_auto_show_toggle(sb)**
 
+Toggle auto showing of details window.
 
-SYMBOLS
+**Symbols.sidebar.symbols.preview_auto_show_set(sb, auto_show_preview:
+boolean)**
 
-….
+Enable/disable auto showing of preview window.
+
+**Symbols.sidebar.symbols.preview_auto_show_toggle(sb)**
+
+Toggle auto showing of preview window.
+
+**Symbols.sidebar.symbols_cursor_follow_set(sb, follow_cursor: boolean)**
+
+Enable/disable following the cursor in the source code window.
+
+**Symbols.sidebar.symbols_cursor_follow_toggle(sb)**
+
+Toggle following the cursor in the source code window.
+
+**Symbols.sidebar.symbols.current_unfold(sb)**
+
+Unfold the symbol under the cursor in the sidebar.
+
+**Symbols.sidebar.symbols.current_fold(sb)**
+
+Fold the symbol under the cursor in the sidebar.
+
+**Symbols.sidebar.symbols.current_fold_toggle(sb)**
+
+Toggle fold state of the symbol under the cursor in the sidebar.
+
+**Symbols.sidebar.symbols.current_folded(sb): boolean**
+
+Returns true if the symbol under the cursor in the sidebar is folded, false
+otherwise.
+
+**Symbols.sidebar.symbols.current_peek(sb)**
+
+In source code window jump to symbol that is under the cursor in the sidebar.
+
+**Symbols.sidebar.symbols.current_visible_children(sb): integer**
+
+Return the number of visible (not filtered out) children of the symbol under
+cursor in the sidebar. Can be used to check if it makes sense to fold/unfold
+symbol.
+
+**Symbols.sidebar.symbols.goto_parent(sb)**
+
+Move the cursor in the sidebar to the parent symbol.
+
+**Symbols.sidebar.symbols.goto_next_symbol_at_level(sb)**
+
+Move the cursor in the sidebar to the next symbol at the same level.
+
+**Symbols.sidebar.symbols.goto_prev_symbol_at_level(sb)**
+
+Move the cursor in the sidebar to the previous symbol at the same level.
 
 
 ==============================================================================

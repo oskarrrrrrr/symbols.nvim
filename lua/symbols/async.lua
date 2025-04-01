@@ -79,7 +79,7 @@ local await_all = function (defer)
 end
 
 local fire_and_forget = function(defer)
-    co.resume(co.create(defer))
+    co.resume(co.create(defer), function(...) end)
 end
 
 return {

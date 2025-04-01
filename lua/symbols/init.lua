@@ -2241,6 +2241,9 @@ end
 ---@param setting string
 ---@param value any
 local function sidebar_show_toggle_notification(win, setting, value)
+    -- do not show the notification if window is closed
+    if win == -1 then return end
+
     local buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_set_option_value("bufhidden", "delete", { buf = buf })
 
@@ -3337,7 +3340,13 @@ local function api_sidebar(f)
             log.warn("sb: symbols.SidebarId argument missing")
             return
         end
-        local sidebar = context.sidebars:get_sidebar_by_id(sb)
+        local sidebar
+        if sb == 0 then
+            local win = vim.api.nvim_get_current_win()
+            sidebar = get_sidebar(context, win)
+        else
+            sidebar = context.sidebars:get_sidebar_by_id(sb)
+        end
         if sidebar == nil then
             warn_missing_sidebar(sb)
         else
@@ -3385,27 +3394,39 @@ Symbols.sidebar.win_source = api_sidebar(function(sidebar) return sidebar.source
 Symbols.sidebar.focus = api_sidebar(
     function(sidebar) vim.api.nvim_set_current_win(sidebar.win) end
 )
+
 Symbols.sidebar.focus_source = api_sidebar(
     function(sidebar) vim.api.nvim_set_current_win(sidebar.source_win) end
 )
 
---- TODO
-Symbols.sidebar.cursor_hiding_set = api_sidebar(
-    ---@param cursor_hiding boolean
-    function(sidebar, cursor_hiding)
-        -- sidebar.ctx.cursor.hide
-    end
-)
+---@param hide_cursor boolean
+Symbols.sidebar.cursor_hiding_set = function(hide_cursor)
+    local win = vim.api.nvim_get_current_win()
+    local sidebar = get_sidebar(context, win)
+    sidebar:cursor_hiding_set(hide_cursor)
+end
 
+Symbols.sidebar.cursor_hiding_toggle = function()
+    local win = vim.api.nvim_get_current_win()
+    local sidebar = get_sidebar(context, win)
+    sidebar:cursor_hiding_toggle()
+end
 
 Symbols.sidebar.view_change = api_sidebar(Sidebar.change_view)
-
--- TODO: auto resize toggle
 
 Symbols.sidebar.auto_resize_set = api_sidebar(
     ---@param auto_resize boolean
     function(sidebar, auto_resize)
         sidebar.auto_resize.enabled = auto_resize
+        if sidebar.auto_resize.enabled then
+            sidebar:schedule_refresh_size()
+        end
+    end
+)
+
+Symbols.sidebar.auto_resize_toggle = api_sidebar(
+    function(sidebar)
+        sidebar.auto_resize.enabled = not sidebar.auto_resize.enabled
         if sidebar.auto_resize.enabled then
             sidebar:schedule_refresh_size()
         end
@@ -3523,8 +3544,7 @@ Symbols.sidebar.symbols.preview_auto_show_set = api_sidebar(
     function(sidebar, auto_show) sidebar.preview:auto_show_set(auto_show) end
 )
 Symbols.sidebar.symbols.preview_auto_show_toggle = api_sidebar(
-    ---@param auto_show boolean
-    function(sidebar, auto_show) sidebar.preview:auto_show_toggle() end
+    function(sidebar) sidebar.preview:auto_show_toggle() end
 )
 
 Symbols.sidebar.symbols_cursor_follow_set = api_sidebar(Sidebar.cursor_follow_set)
