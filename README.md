@@ -14,6 +14,7 @@ Code navigation sidebar. Instantly find your way around any file.
 - **Custom Display Rules** - configurable filtering and display formatting per language.
 - **Preserving Folds** - keeps your sidebar folds in tact on updates (most of the time).
 - **Mouse Support** - works with mouse.
+- **Lua API** - for powerful keymaps and automations.
 
 https://github.com/user-attachments/assets/6262fa59-a320-4043-a3ba-97617f0fd8b3
 
@@ -27,6 +28,11 @@ https://github.com/user-attachments/assets/6262fa59-a320-4043-a3ba-97617f0fd8b3
 
 # Quick Start
 
+> **Warning**
+>
+> The main branch is used for development and may introduce breaking changes without warning.
+> For a more stable experience use tags with you plugin manager.
+
 Using lazy.nvim:
 
 ```lua
@@ -34,20 +40,26 @@ Using lazy.nvim:
     "oskarrrrrrr/symbols.nvim",
     config = function()
         local r = require("symbols.recipes")
-        require("symbols").setup(r.DefaultFilters, r.AsciiSymbols, {
-            -- custom settings here
-            -- e.g. hide_cursor = false
-        })
-        vim.keymap.set("n", ",s", "<cmd> Symbols<CR>")
-        vim.keymap.set("n", ",S", "<cmd> SymbolsClose<CR>")
+        require("symbols").setup(
+            r.DefaultFilters,
+            r.AsciiSymbols,
+            {
+                sidebar = {
+                    -- custom settings here
+                    -- e.g. hide_cursor = false
+                }
+            }
+        )
+        vim.keymap.set("n", ",s", "<cmd>Symbols<CR>")
+        vim.keymap.set("n", ",S", "<cmd>SymbolsClose<CR>")
     end
 }
 ```
 
-> **Warning**
->
-> The main branch is used for development and may introduce breaking changes without warning.
-> For a more stable experience use tags with you plugin manager.
+Make sure to checkout these sections:
+- [Tips](#tips)
+- [Configuration](#configuration) (especially the example config with cool keymaps)
+- [Lua API](#lua-api) (useful for custom keymaps and automations)
 
 # Supported Languages
 
@@ -153,6 +165,202 @@ There are a few predefined recipes (configs) that you can use:
 - FancySymbols - symbol kind will be displated as an icon. Needs `lspkind.nvim`.
 
 The recipes are available in `symbols.recipes` module.
+
+<details>
+<summary>Example Config With Cool Keymaps</summary>
+
+```lua
+local function symbols_setup()
+    local symbols = require("symbols")
+    local r = require("symbols.recipes")
+
+    symbols.setup(
+        r.DefaultFilters,
+        r.AsciiSymbols, -- or r.FancySymbols
+        { -- custom settings
+            sidebar = {
+                auto_peek = false,
+                cursor_follow = true,
+                close_on_goto = false,
+                preview = {
+                    -- add a convenient keymap
+                    keymaps = { ["<cr>"] = "goto-code" }
+                },
+            },
+        }
+    )
+
+    -- Example keymaps below.
+
+    -- async, needed for some keymaps
+    local a = Symbols.a
+
+    -- Open the sidebar.
+    vim.keymap.set("n", ",s", "<cmd>Symbols<CR>")
+
+    -- Close the sidebar.
+    vim.keymap.set("n", ",S", "<cmd>SymbolsClose<CR>")
+
+    -- Search in the sidebar. Open the sidebar if it's closed.
+    vim.keymap.set(
+        "n", "s",
+        a.sync(function()
+            a.wait(Symbols.sidebar.open(0))
+            Symbols.sidebar.view_set(0, "search")
+            Symbols.sidebar.focus(0)
+        end)
+    )
+
+    -- Show current symbol in the sidebar (unfolds symbols if needed).
+    -- Opens the sidebar if it's closed. Especially useful with deeply
+    -- nested symbols, e.g. when using with JSON files.
+    vim.keymap.set(
+        "n", "gs",
+        a.sync(function()
+            a.wait(Symbols.sidebar.open(0))
+            Symbols.sidebar.symbols.goto_symbol_under_cursor(0)
+            Symbols.sidebar.focus(0)
+        end)
+    )
+
+    -- The next two mappings move the cursor up/down in the sidebar and peek the symbol
+    -- without changing the focused window.
+
+    vim.keymap.set(
+        "n", "<C-k>",
+        function()
+            if not Symbols.sidebar.visible(0) then return end
+            Symbols.sidebar.view_set(0, "symbols")
+            Symbols.sidebar.focus(0)
+            local count = math.max(vim.v.count, 1)
+            local pos = vim.api.nvim_win_get_cursor(0)
+            local new_cursor_row = math.max(1, pos[1] - count)
+            pcall(vim.api.nvim_win_set_cursor, 0, {new_cursor_row, pos[2]})
+            Symbols.sidebar.symbols.current_peek(0)
+            Symbols.sidebar.focus_source(0)
+        end
+    )
+
+    vim.keymap.set(
+        "n", "<C-j>",
+        function()
+            if not Symbols.sidebar.visible(0) then return end
+            Symbols.sidebar.view_set(0, "symbols")
+            Symbols.sidebar.focus(0)
+            local win = Symbols.sidebar.win(0)
+            local sidebar_line_count = vim.fn.line("$", win)
+            local pos = vim.api.nvim_win_get_cursor(0)
+            local count = math.max(vim.v.count, 1)
+            local new_cursor_row = math.min(sidebar_line_count, pos[1] + count)
+            pcall(vim.api.nvim_win_set_cursor, 0, {new_cursor_row, pos[2]})
+            Symbols.sidebar.symbols.current_peek(0)
+            Symbols.sidebar.focus_source(0)
+        end
+    )
+
+    -- Below are 8 mappings (zm, Zm, zr, zR, zo, zO, zc, zC) for managing folds.
+    -- They modify the sidebar folds and regular vim folds at the same time.
+    -- In some cases the behavior might be surprising, for instance, when you
+    -- use folds that do not correspond to symbols in the sidebar.
+
+    vim.keymap.set(
+        "n", "zm",
+        function()
+            if Symbols.sidebar.visible(0) then
+                local count = math.max(vim.v.count, 1)
+                Symbols.sidebar.symbols.fold(0, count)
+            end
+            pcall(vim.cmd, "normal! zm")
+        end
+    )
+
+    vim.keymap.set(
+        "n", "zM",
+        function()
+            if Symbols.sidebar.visible(0) then
+                Symbols.sidebar.symbols.fold_all(0)
+            end
+            pcall(vim.cmd, "normal! zM")
+        end
+    )
+
+
+    vim.keymap.set(
+        "n", "zr",
+        function()
+            if Symbols.sidebar.visible(0) then
+                local count = math.max(vim.v.count, 1)
+                Symbols.sidebar.symbols.unfold(0, count)
+            end
+            pcall(vim.cmd, "normal! zr")
+        end
+    )
+
+    vim.keymap.set(
+        "n", "zR",
+        function()
+            local sb = Symbols.sidebar.get()
+            if Symbols.sidebar.visible(sb) then
+                Symbols.sidebar.symbols.unfold_all(sb)
+            end
+            pcall(vim.cmd, "normal! zR")
+        end
+    )
+
+    vim.keymap.set(
+        "n", "zo",
+        function()
+            local sb = Symbols.sidebar.get()
+            if Symbols.sidebar.visible(sb) then
+                Symbols.sidebar.symbols.current_unfold(sb)
+            end
+            pcall(vim.cmd, "normal! zo")
+        end
+    )
+
+    vim.keymap.set(
+        "n", "zO",
+        function()
+            local sb = Symbols.sidebar.get()
+            if Symbols.sidebar.visible(sb) then
+                Symbols.sidebar.symbols.current_unfold(sb, true)
+            end
+            pcall(vim.cmd, "normal! zO")
+        end
+    )
+
+    vim.keymap.set(
+        "n", "zc",
+        function()
+            local sb = Symbols.sidebar.get()
+            if Symbols.sidebar.visible(sb) then
+                if (
+                    Symbols.sidebar.symbols.current_visible_children(sb) == 0
+                    or Symbols.sidebar.symbols.current_folded(sb)
+                ) then
+                    Symbols.sidebar.symbols.goto_parent(sb)
+                else
+                    Symbols.sidebar.symbols.current_fold(sb)
+                end
+            end
+            pcall(vim.cmd, "normal! zc")
+        end
+    )
+
+    vim.keymap.set(
+        "n", "zC",
+        function()
+            local sb = Symbols.sidebar.get()
+            if Symbols.sidebar.visible(sb) then
+                Symbols.sidebar.symbols.current_fold(sb, true)
+            end
+            pcall(vim.cmd, "normal! zC")
+        end
+    )
+end
+```
+
+</details>
 
 ## Reference
 
@@ -366,11 +574,7 @@ Default config below.
 }
 ```
 
-# Types
-
-##### `Symbols.SidebarView: "symbols" | "search"`
-
-# Module
+# Lua API
 
 > **warning** - Lua API is experimental for now. There might be breaking changes without additional warnings.
 
@@ -489,6 +693,19 @@ If there is no sidebar for the given window yet then it will be created but not 
 
 Wrapped function that opens a sidebar. It's safe to call when the sidebar is already open.
 
+<details>
+<summary>Example</summary>
+
+```lua
+local a = Symbols.a
+a.sync(function()
+    a.wait(Symbols.sidebar.open(0))
+    Symbols.sidebar.symbols.unfold_all(0)
+end)()
+```
+
+</details>
+
 **`Symbols.sidebar.close(sb)`**
 
 Closes a sidebar.
@@ -525,9 +742,13 @@ Set cursor hiding. Note this is a global setting so `sb` is not needed.
 
 Toggle cursor hiding. Note this is a global setting so `sb` is not needed.
 
-**`Symbols.sidebar.view_change(sb, view: "search" | "symbols")`**
+**`Symbols.sidebar.view_set(sb, view: "symbols" | "search")`**
 
-Change sidebar view.
+Change sidebar view. Doesn't change the focused window.
+
+**`Symbols.sidebar.view_get(sb): "symbols" | "search"`**
+
+Get current sidebar view.
 
 **`Symbols.sidebar.auto_resize_set(sb, auto_resize: boolean)`**
 

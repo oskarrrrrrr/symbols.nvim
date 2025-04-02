@@ -1165,7 +1165,8 @@ function SearchView:jump_to_current_symbol()
     flash_highlight_under_cursor(self.sidebar.source_win, 400, 1)
 end
 
-function SearchView:show_prompt()
+---@param focus boolean
+function SearchView:show_prompt(focus)
     self:show_prompt_win()
 
     vim.keymap.set(
@@ -1178,7 +1179,7 @@ function SearchView:show_prompt()
     vim.keymap.set(
         "n", "<Esc>",
         function()
-            self.sidebar:change_view("symbols")
+            self.sidebar:change_view("symbols", true)
         end,
         { buffer = self.buf }
     )
@@ -1190,19 +1191,22 @@ function SearchView:show_prompt()
             if self.sidebar.close_on_goto then
                 self.sidebar:close()
             else
-                self.sidebar:change_view("symbols")
+                self.sidebar:change_view("symbols", true)
             end
         end,
         { buffer = self.buf }
     )
 
-    vim.api.nvim_set_current_win(self.prompt_win)
-    vim.cmd("startinsert!")
+    if focus then
+        vim.api.nvim_set_current_win(self.prompt_win)
+        vim.cmd("startinsert!")
+    end
 end
 
-function SearchView:show()
+---@param focus boolean
+function SearchView:show(focus)
     vim.api.nvim_win_set_buf(self.sidebar.win, self.buf)
-    self:show_prompt()
+    self:show_prompt(focus)
 end
 
 function SearchView:destroy()
@@ -1386,7 +1390,8 @@ function Sidebar:source_win_buf()
 end
 
 ---@param new_view symbols.SidebarView
-function Sidebar:change_view(new_view)
+---@param focus boolean
+function Sidebar:change_view(new_view, focus)
     if self.current_view == "symbols" then
     elseif self.current_view == "search" then
         self.search_view:hide()
@@ -1397,9 +1402,9 @@ function Sidebar:change_view(new_view)
     if new_view == "symbols" then
         vim.api.nvim_win_set_buf(self.win, self.buf)
     elseif new_view == "search" then
-        self.search_view:show()
+        self.search_view:show(focus)
     else
-        assert(false, "Unknown view: " .. tostring(new_view))
+        assert(false, "Unknown new view: " .. tostring(new_view))
     end
 
     self.current_view = new_view
@@ -2577,7 +2582,7 @@ function Sidebar:fold_all()
 end
 
 function Sidebar:search()
-    self:change_view("search")
+    self:change_view("search", true)
 end
 
 function Sidebar:toggle_fold()
@@ -3071,7 +3076,11 @@ local function setup_user_commands(ctx)
             local win = vim.api.nvim_get_current_win()
             local sidebar = get_sidebar(ctx, win)
             if sidebar:visible() then
-                vim.api.nvim_set_current_win(sidebar.win)
+                if win == sidebar.win then
+                    vim.api.nvim_set_current_win(sidebar.source_win)
+                else
+                    vim.api.nvim_set_current_win(sidebar.win)
+                end
                 sidebar:refresh_symbols()
             else
                 sidebar:open()
@@ -3392,7 +3401,16 @@ Symbols.sidebar.win = api_sidebar(function(sidebar) return sidebar.win end)
 Symbols.sidebar.win_source = api_sidebar(function(sidebar) return sidebar.source_win end)
 
 Symbols.sidebar.focus = api_sidebar(
-    function(sidebar) vim.api.nvim_set_current_win(sidebar.win) end
+    function(sidebar)
+        if sidebar.current_view == "symbols" then
+            vim.api.nvim_set_current_win(sidebar.win)
+        elseif sidebar.current_view == "search" then
+            vim.api.nvim_set_current_win(sidebar.search_view.prompt_win)
+        else
+            vim.api.nvim_set_current_win(sidebar.win)
+            log.warn("Unhandled view in Symbols.sidebar.focus: " .. sidebar.current_view)
+        end
+    end
 )
 
 Symbols.sidebar.focus_source = api_sidebar(
@@ -3412,7 +3430,16 @@ Symbols.sidebar.cursor_hiding_toggle = function()
     sidebar:cursor_hiding_toggle()
 end
 
-Symbols.sidebar.view_change = api_sidebar(Sidebar.change_view)
+Symbols.sidebar.view_set = api_sidebar(
+    ---@param view "symbols" | "search"
+    function(sidebar, view)
+        sidebar:change_view(view, false)
+    end
+)
+
+Symbols.sidebar.view_get = api_sidebar(
+    function(sidebar) return sidebar.current_view end
+)
 
 Symbols.sidebar.auto_resize_set = api_sidebar(
     ---@param auto_resize boolean
