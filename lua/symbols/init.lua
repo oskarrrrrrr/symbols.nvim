@@ -14,7 +14,6 @@ local providers = require("symbols.providers")
 
 Symbols = {}
 
-
 Symbols.FILE_TYPE_MAIN = "SymbolsSidebar"
 Symbols.FILE_TYPE_SEARCH = "SymbolsSearch"
 Symbols.FILE_TYPE_HELP = "SymbolsHelp"
@@ -493,7 +492,7 @@ end
 ---@alias SymbolStates table<Symbol, SymbolState>
 
 ---@param root Symbol
----@return Symbols
+---@return SymbolStates
 local function SymbolStates_build(root)
     local states = {}
 
@@ -1410,64 +1409,113 @@ function Sidebar:change_view(new_view, focus)
     self.current_view = new_view
 end
 
----@param root Symbol
+---@param symbols Symbols
 ---@param pos Pos # row and column zero-indexed
 ---@return Symbol
-local function symbol_at_pos(root, pos)
+local function symbol_at_pos(symbols, pos)
+    local root = symbols.root
 
-    ---@param range Range
-    ---@param _pos Pos
+    ---@param symbol Symbol
     ---@return boolean
-    local function in_range_line(range, _pos)
-        return range.start.line <= _pos.line and _pos.line <= range["end"].line
+    local function visible(symbol)
+        return symbols.states[symbol].visible
     end
 
     ---@param range Range
     ---@param _pos Pos
     ---@return boolean
-    local function in_range_character(range, _pos)
-        return range.start.character <= _pos.character and _pos.character <= range["end"].character
-    end
-
-    ---@param range Range
-    ---@param _pos Pos
-    ---@return boolean
-    local function range_before_pos(range, _pos)
+    local function pos_in_range(range, _pos)
         return (
-            range["end"].line < _pos.line
-            or (
-                range["end"].line == _pos.line
-                and range["end"].character < _pos.line
+           (
+               range.start.line < _pos.line
+               or (range.start.line == _pos.line and range.start.character <= _pos.character)
+            ) and (
+                _pos.line < range["end"].line
+                or (_pos.line == range["end"].line and _pos.character <= range["end"].character)
             )
         )
     end
 
-    local current = root
-    local partial_match = true
-    while #current.children > 0 and partial_match do
-        partial_match = false
-        local prev = current
-        for _, symbol in ipairs(current.children) do
-            if range_before_pos(symbol.range, pos) then
-                prev = symbol
-            end
-            if not partial_match and in_range_line(symbol.range, pos) then
-                current = symbol
-                partial_match = true
-            end
-            if partial_match then
-                if in_range_line(symbol.range, pos) then
-                    if in_range_character(symbol.range, pos) then
-                        current = symbol
-                        break
-                    end
-                else
-                    break
-                end
-            end
-        end
-        if not partial_match then current = prev end
+    ---@param range Range
+    ---@param _pos Pos
+    ---@return boolean
+    local function pos_greater_than_range(range, _pos)
+        return (
+            range["end"].line < _pos.line
+            or (range["end"].line == _pos.line and range["end"].character < _pos.line)
+        )
     end
+
+    ---@param range Range
+    ---@param _pos Pos
+    ---@return boolean
+    local function pos_less_than_range(range, _pos)
+        return (
+            _pos.line < range.start.line
+            or (_pos.line == range.start.line and _pos.character < range.start.character)
+        )
+    end
+
+    local current = root
+    while #current.children > 0 do
+        local original_current = current
+        local prev = nil
+
+        for _, symbol in ipairs(current.children) do
+            if not visible(symbol) then
+                goto next_symbol
+            end
+
+            -- While the symbols are before the cursor save them to prev.
+            -- This will be useful if we fail to find an exact match.
+            if pos_greater_than_range(symbol.range, pos) then
+                prev = symbol
+                goto next_symbol
+            end
+
+            -- If we are exactly in a symbol then we do not have to look further.
+            if pos_in_range(symbol.range, pos) then
+                current = symbol
+                goto continue
+            end
+
+            if (
+                current.range.start.line ~= symbol.range.start.line and
+                symbol.range.start.line == pos.line and symbol.range.start.character > pos.character
+            ) then
+                current = symbol
+            end
+
+            -- Stop looking after visiting the first symbol further than cursor position.
+            -- Note that this symbol will be used in some cases, e.g. when the cursor is
+            -- at the beginning of a line then the first symbol in that line will be returned
+            -- (assuming there is one).
+            if pos_less_than_range(symbol.range, pos) then
+                break
+            end
+
+            ::next_symbol::
+        end
+
+        if original_current == current then
+            -- No visible symbols.
+            if prev == nil then
+                break
+            end
+            -- Take last visible symbol.
+            current = prev
+        end
+
+        ::continue::
+    end
+
+    -- If we found no matches then try to return the first visible symbol.
+    if current.level == 0 then
+        for _, symbol in ipairs(current.children) do
+            if visible(symbol) then return symbol end
+        end
+    end
+
     return current
 end
 
@@ -2320,7 +2368,7 @@ end
 function Sidebar:show_symbol_under_cursor()
     local symbols = self:current_symbols()
     local pos = Pos_from_point(vim.api.nvim_win_get_cursor(self.source_win))
-    local symbol = symbol_at_pos(symbols.root, pos)
+    local symbol = symbol_at_pos(symbols, pos)
     self:set_cursor_at_symbol(symbol, true)
 end
 
@@ -2892,7 +2940,7 @@ function Sidebar:set_cursor_at_symbol_from_source()
     ) then return end
     local symbols = self:current_symbols()
     local pos = Pos_from_point(vim.api.nvim_win_get_cursor(self.source_win))
-    local symbol = symbol_at_pos(symbols.root, pos)
+    local symbol = symbol_at_pos(symbols, pos)
     self:set_cursor_at_symbol(symbol, false)
 end
 
@@ -3632,5 +3680,13 @@ Symbols.sidebar.symbols.current_visible_children = api_sidebar(
 Symbols.sidebar.symbols.goto_parent = api_sidebar(Sidebar.goto_parent)
 Symbols.sidebar.symbols.goto_next_symbol_at_level = api_sidebar(Sidebar.next_symbol_at_level)
 Symbols.sidebar.symbols.goto_prev_symbol_at_level = api_sidebar(Sidebar.prev_symbol_at_level)
+
+-- used for testing
+Symbols._internal = {
+    symbol = _symbol,
+    Symbols_new = Symbols_new,
+    SymbolStates_build = SymbolStates_build,
+    symbol_at_pos = symbol_at_pos,
+}
 
 return Symbols
