@@ -1,0 +1,8 @@
+name: type checking
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - run: echo Hello world!
