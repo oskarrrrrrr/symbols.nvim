@@ -5,4 +5,31 @@ jobs:
   test:
     runs-on: [self-hosted, linux, x64]
     steps:
-      - run: echo Hello world!
+      - uses: actions/checkout@v3
+
+      - name: Setup env
+        run: |
+          echo "/opt/neovim-v0.11.2" >> $GITHUB_PATH
+          mkdir -p $PWD/.gha-home
+
+      - name: Install deps
+        run: |
+          mkdir -p deps
+          make deps-treesitter 
+          make deps-lua-lsp-linux-x86
+
+      - name: Type check
+        run: |
+          make lint
+
+      - name: Install Treesitter parsers
+        env:
+          HOME: ${{ github.workspace }}/.gha-home
+        run: |
+          nvim -u tests/nvim_test/init.lua -c "InstallTSParsers"
+
+      - name: Test
+        env:
+          HOME: ${{ github.workspace }}/.gha-home
+        run: |
+          make test

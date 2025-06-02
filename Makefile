@@ -46,8 +46,15 @@ deps-treesitter:
 deps-lua-lsp:
 	cd deps; curl -L --remote-name https://github.com/LuaLS/lua-language-server/releases/download/3.13.2/lua-language-server-3.13.2-darwin-arm64.tar.gz
 	mkdir -p deps/lua-language-server
-	cd deps; tar -xvzf lua-language-server-3.13.2-darwin-arm64.tar.gz -C lua-language-server
+	cd deps; tar -xzf lua-language-server-3.13.2-darwin-arm64.tar.gz -C lua-language-server
 	rm deps/lua-language-server-3.13.2-darwin-arm64.tar.gz
+
+.PHONY: deps-lua-lsp-linux-x86
+deps-lua-lsp-linux-x86:
+	cd deps; curl -L --remote-name https://github.com/LuaLS/lua-language-server/releases/download/3.14.0/lua-language-server-3.14.0-linux-x64.tar.gz
+	mkdir -p deps/lua-language-server
+	cd deps; tar -xzf lua-language-server-3.14.0-linux-x64.tar.gz -C lua-language-server
+	rm deps/lua-language-server-3.14.0-linux-x64.tar.gz
 
 # assumes Ruby 3.3.0 (or similar) and bundler (https://bundler.io) installed
 .PHONY: deps-solargraph-lsp

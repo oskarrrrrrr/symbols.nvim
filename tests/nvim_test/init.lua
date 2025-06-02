@@ -1,11 +1,26 @@
 vim.cmd("let &rtp.=','.getcwd()")
-require("symbols").setup()
+require("symbols").setup({
+    providers = {
+        lsp = {
+            timeout_ms = 2000,
+        }
+    }
+})
 
 vim.cmd("set runtimepath+=deps/nvim-treesitter")
 require("nvim-treesitter.configs").setup({
-    ensure_installed = { "markdown", "org", "vimdoc", "json", "make" },
-    auto_install = true,
+    ensure_installed = { "markdown", "vimdoc", "json", "make" },
+    auto_install = false,
 })
+
+vim.api.nvim_create_user_command(
+    "InstallTSParsers",
+    function()
+        vim.api.nvim_exec2("TSUpdateSync", {})
+        vim.api.nvim_exec2("quitall!", {})
+    end,
+    {}
+)
 
 vim.api.nvim_create_autocmd(
     "FileType",
