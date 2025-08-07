@@ -26,8 +26,8 @@ end
 ---@param symbol Symbol
 ---@return boolean
 local function javascript_filter(symbol)
-    local pkind = symbol.parent.kind
-    if (pkind == "Function" or pkind == "Method" or pkind == "Constructor") then return false end
+    -- local pkind = symbol.parent.kind
+    -- if (pkind == "Function" or pkind == "Method" or pkind == "Constructor") then return false end
     return true
 end
 
@@ -287,6 +287,23 @@ M.AsciiSymbols = {
                 },
                 make = {
                     Target = "",
+                },
+                typescript = {
+                    Async = "async",
+                    Class = "class",
+                    Const = "const",
+                    Enum = "enum",
+                    EnumMember = "",
+                    Function = "fun",
+                    Getter = "get",
+                    Index = "index",
+                    Interface = "interface",
+                    Method = "fun",
+                    Module = "module",
+                    Namespace = "namespace",
+                    Property = "",
+                    Setter = "set",
+                    TypeParameter = "type",
                 },
             }
         }

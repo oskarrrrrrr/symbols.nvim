@@ -520,6 +520,285 @@ local function make_get_symbols(parser, buf)
     return true, root
 end
 
+---@type TSProviderGetSymbols
+local function typescript_get_symbols(parser, buf)
+
+    ---@param node any
+    ---@param node_type string
+    ---@return any
+    local function ts_find_child_of_type(node, node_type)
+        for child in node:iter_children() do
+            if child:type() == node_type then
+                return child
+            end
+        end
+        return nil
+    end
+
+    ---@param node any
+    ---@param node_type string
+    ---@return string
+    local function ts_get_child_text(node, node_type)
+        local child = ts_find_child_of_type(node, node_type)
+        return (child == nil and "") or get_ts_node_text(child, buf)
+    end
+
+    ---@param node any
+    ---@param name string
+    ---@return any
+    local function ts_get_field_node(node, name)
+        local fields = node:field(name)
+        if #fields > 1 then
+            vim.print("symbols.nvim: multiple fields with name: " .. name)
+        end
+        if #fields > 0 then return fields[1] end
+        return nil
+    end
+
+    --- Utility to get field by name. Expects at most 1 field with given name.
+    ---@param node any
+    ---@param name string
+    ---@return string
+    local function ts_get_field(node, name)
+        local named_node = ts_get_field_node(node, name)
+        if named_node == nil then return "" end
+        return get_ts_node_text(named_node, buf)
+    end
+
+    local query_string = [[
+        ;; const, let and declare; arrow functions are captured here
+        (lexical_declaration) @declaration
+
+        (type_alias_declaration) @type
+
+        (enum_declaration) @enum
+            ;; we could handle those by iterating the children of @enum
+            (enum_body (enum_assignment) @enum-member)
+            (enum_body (property_identifier) @enum-member-simple)
+
+        (function_declaration) @function
+        (function_signature)   @function
+
+        (class_declaration)          @class
+        (abstract_class_declaration) @class
+
+            (public_field_definition) @property
+            (property_signature)      @property
+
+            (required_parameter) @constructor-param
+
+            (class_body (index_signature)          @index)
+            (interface_body (index_signature)      @index)
+
+            (method_definition)                @method
+            (method_signature)                 @method
+            ;; (interface_body (method_signature) @method)
+            (abstract_method_signature)        @method
+
+        (interface_declaration) @interface
+
+        (internal_module) @namespace
+
+        (module) @module
+        (ambient_declaration (statement_block)) @module-alt
+    ]]
+    local query = vim.treesitter.query.parse("typescript", query_string)
+    local root_node = parser:parse()[1]:root()
+
+    local root = Symbol_root()
+    local prev_symbol = root
+
+    for id, node, _, _ in query:iter_captures(root_node, 0) do
+        local start_row, start_col, end_row, end_col = node:range()
+        local range = {
+            ["start"] = { line = start_row, character = start_col },
+            ["end"] = { line = end_row, character = end_col },
+        }
+
+        ---@param outer_range Range
+        ---@param inner_range Range
+        ---@return boolean
+        local function range_contains(outer_range, inner_range)
+            -- handle "infinite" range
+            if outer_range["end"].line == -1 then return true end
+            return (
+                (
+                    outer_range["start"].line < inner_range["start"].line
+                    or (
+                        outer_range["start"].line == inner_range["start"].line
+                        and outer_range["start"].character <= inner_range["start"].character
+                    )
+                )
+                and (
+                    outer_range["end"].line > inner_range["end"].line
+                    or (
+                        outer_range["end"].line == inner_range["end"].line
+                        and outer_range["end"].character >= inner_range["end"].character
+                    )
+                )
+            )
+        end
+
+        local parent = prev_symbol
+        while not range_contains(parent.range, range) do
+            parent = parent.parent
+            assert(parent ~= nil)
+        end
+
+        ---@type Symbol
+        local new = {
+            kind = "",
+            name = "",
+            detail = "",
+            level = parent.level + 1,
+            parent = parent,
+            children = {},
+            range = range,
+        }
+
+        ---@type string
+        local capture = query.captures[id]
+
+        if capture == "declaration" then
+            ---@type "let" | "const"
+            local declWord = get_ts_node_text(node:child(0), buf)
+            if declWord ~= "const" then goto nextNode end
+
+            local variableDeclaratorNode = node:child(1)
+            local valueNode = ts_get_field_node(variableDeclaratorNode, "value")
+
+            local varType = (valueNode ~= nil and valueNode:type()) or "declare"
+            new.kind = (varType == "arrow_function" and "Function") or "Const"
+            new.name = ts_get_field(variableDeclaratorNode, "name")
+
+            new.detail = ts_get_field(variableDeclaratorNode, "type")
+            if varType == "arrow_function" then
+                local parameters = ts_get_field(valueNode, "parameters")
+                local return_type = ts_get_field(valueNode, "return_type")
+                new.detail = table.concat({ parameters, return_type}, "")
+            end
+
+        elseif capture == "type" then
+            new.kind = "TypeParameter"
+            new.name = ts_get_field(node, "name")
+
+            local type_params = ts_get_field(node, "type_parameters")
+            local details = { type_params }
+            new.detail = table.concat(details, "")
+
+        elseif capture == "enum" then
+            new.kind = "Enum"
+            new.name = ts_get_field(node, "name")
+
+        -- enum member with assignment
+        elseif capture == "enum-member" then
+            new.kind = "EnumMember"
+            new.name = ts_get_field(node, "name")
+
+            local value = ts_get_field(node, "value")
+            new.detail = (value == "" and "") or ("= " .. value)
+
+        -- enum member without assignment
+        elseif capture == "enum-member-simple" then
+            new.kind = "EnumMember"
+            new.name = get_ts_node_text(node, buf)
+
+        elseif capture == "function" then
+            ---@type "function" | "async"
+            local functionType = node:child(0)
+            local isAsync = functionType == "async"
+            new.kind = (isAsync and "Async") or "Function"
+            new.name = ts_get_field(node, "name")
+
+            local type_parameters = ts_get_field(node, "type_parameters")
+            local parameters = ts_get_field(node, "parameters")
+            local return_type = ts_get_field(node, "return_type")
+            new.detail = table.concat({ type_parameters, parameters, return_type }, "")
+
+        elseif capture == "class" then
+            new.kind = "Class"
+
+            local nameNode = node:named_child("name")
+            new.name = get_ts_node_text(nameNode, buf)
+
+            local type_params = ts_get_field(node, "type_parameters")
+            local class_heritage = ts_get_child_text(node, "class_heritage")
+            local details = { type_params, class_heritage }
+            new.detail = table.concat(details, "")
+
+        elseif capture == "property" then
+            new.kind = "Property"
+            new.name = ts_get_field(node, "name")
+            new.detail = ts_get_field(node, "type")
+
+        elseif capture == "constructor-param" then
+            -- process only properties
+            local modifier_node = ts_find_child_of_type(node, "accessibility_modifier")
+            local has_accessibility_modifier = modifier_node ~= nil
+            if not has_accessibility_modifier then goto nextNode end
+
+            new.kind = "Property"
+            new.name = ts_get_field(node, "pattern")
+            new.detail = ts_get_field(node, "type")
+
+        elseif capture == "index" then
+            new.kind = "Index"
+            new.name = ts_get_field(node, "name")
+            local index_type = ts_get_field(node, "index_type")
+            local type = ts_get_field(node, "type")
+            new.detail = "[" .. index_type .. "]" .. type
+
+        elseif capture == "method" then
+            new.kind = "Method"
+            new.kind = (ts_find_child_of_type(node, "get") ~= nil and "Getter") or new.kind
+            new.kind = (ts_find_child_of_type(node, "set") ~= nil and "Setter") or new.kind
+
+            new.name = ts_get_field(node, "name")
+
+            new.detail = table.concat ({
+                ts_get_field(node, "type_parameters"),
+                ts_get_field(node, "parameters"),
+                ts_get_field(node, "return_type"),
+            }, "")
+
+        elseif capture == "interface" then
+            new.kind = "Interface"
+            new.name = ts_get_field(node, "name")
+
+            local type_params = ts_get_field(node, "type_parameters")
+            local extends_type_clause = ts_get_child_text(node, "extends_type_clause ")
+            local details = { type_params, extends_type_clause }
+            new.detail = table.concat(details, "")
+
+        elseif capture == "namespace" then
+            new.kind = "Namespace"
+
+            local nameNode = node:named_child("name")
+            new.name = get_ts_node_text(nameNode, buf)
+
+        elseif capture == "module" then
+            new.kind = "Module"
+
+            local nameNode = node:named_child("name")
+            new.name = get_ts_node_text(nameNode, buf)
+
+        elseif capture == "module-alt" then
+            new.kind = "Module"
+
+            local nameNode = node:child(1)
+            new.name = get_ts_node_text(nameNode, buf)
+
+        end
+
+        table.insert(parent.children, new)
+        prev_symbol = new
+
+        ::nextNode::
+    end
+
+    return true, root
+end
+
 ---@class TSProvider: Provider
 ---@field name string
 ---@field parser (fun(parser: any, buf: integer): boolean, Symbol) | nil
@@ -546,6 +825,7 @@ function TSProvider:supports(buf)
         jsonl = "json",
         org = "org",
         make = "make",
+        typescript = "typescript",
     }
     local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
     local parser_name = ft_to_parser_name[ft]
@@ -568,6 +848,7 @@ function TSProvider:get_symbols(buf)
         jsonl = json_get_symbols,
         org = org_get_symbols,
         make = make_get_symbols,
+        typescript = typescript_get_symbols,
     }
     local get_symbols = get_symbols_funs[self.ft]
     assert(get_symbols ~= nil, "Failed to get `get_symbols` for ft: " .. tostring(self.ft))

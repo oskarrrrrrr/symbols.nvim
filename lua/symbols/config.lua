@@ -318,6 +318,23 @@ M.default = {
                 make = {
                     Target = "",
                 },
+                typescript = {
+                    Async = "Async",
+                    Class = "Type",
+                    Const = "Constant",
+                    Enum = "Type",
+                    EnumMember = "Constant",
+                    Function = "Function",
+                    Getter = "Function",
+                    Index = "Function",
+                    Interface = "Type",
+                    Method = "Function",
+                    Module = "Include",
+                    Namespace = "Include",
+                    Property = "Identifier",
+                    Setter = "Function",
+                    TypeParameter = "Type",
+                },
                 default = {},
             }
         },
