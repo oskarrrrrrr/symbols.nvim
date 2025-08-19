@@ -594,13 +594,13 @@ local function SymbolsCache_new()
 end
 
 ---@class symbols.SymbolsRetriever
----@field providers [string, any][] type(Provider)[]
+---@field providers table<string, Provider>
 ---@field providers_config ProvidersConfig
 ---@field cache SymbolsCache
 local SymbolsRetriever = {}
 SymbolsRetriever.__index = SymbolsRetriever
 
----@param providers Provider[]
+---@param providers table<string, Provider>
 ---@param providers_config ProvidersConfig
 ---@return symbols.SymbolsRetriever
 local function SymbolsRetriever_new(providers, providers_config)
@@ -686,11 +686,17 @@ local function SymbolsRetriever_retrieve(retriever, buf, on_retrieve, on_fail, o
     end
 
     log.trace("attempting to retrieve symbols")
-    for _, _provider in ipairs(retriever.providers) do
-        local provider_name = _provider[1]
+
+    local providers_order = cfg.resolve_providers_priority(
+        buf,
+        retriever.providers_config.priority_fun,
+        retriever.providers_config.priority
+    )
+
+    for _, provider_name in ipairs(providers_order) do
         local config = retriever.providers_config[provider_name]
         ---@type Provider
-        local provider = _provider[2]:new(config)
+        local provider = retriever.providers[provider_name]:new(config)
         if provider:supports(buf) then
             log.trace("using provider: " .. provider_name)
             table.insert(entry.post_update_callbacks, on_retrieve)
@@ -3315,10 +3321,10 @@ local context = Context_new()
 function Symbols.setup(...)
     local config = cfg.prepare_config(...)
 
-    ---@type [string, Provider][]
+    ---@type table<string, Provider>
     local providers = {
-        { "lsp", providers.LspProvider },
-        { "treesitter", providers.TSProvider },
+        lsp = providers.LspProvider,
+        treesitter = providers.TSProvider,
     }
     local symbols_retriever = SymbolsRetriever_new(providers, config.providers)
 

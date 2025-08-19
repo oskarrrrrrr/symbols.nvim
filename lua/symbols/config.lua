@@ -1,3 +1,5 @@
+local log = require("symbols.log")
+
 local M = {}
 
 ---@class CharConfig
@@ -132,7 +134,15 @@ M.OpenDirection = {
 
 ---@class TreesitterConfig : ProviderConfig
 
+---@class symbols.ProvidersPriorityFunInput
+---@field filetype string
+---@field path string
+
+---@alias symbols.ProvidersPriorityFun fun(input: symbols.ProvidersPriorityFunInput): string[] | nil
+
 ---@class ProvidersConfig
+---@field priority table<string, string[]>
+---@field priority_fun symbols.ProvidersPriorityFun
 ---@field lsp LspConfig
 ---@field treesitter TreesitterConfig
 
@@ -234,6 +244,10 @@ M.default = {
         },
     },
     providers = {
+        priority = {
+            ["*"] = { "lsp", "treesitter" },
+        },
+        priority_fun = function() return nil end,
         lsp = {
             timeout_ms = 2000,
             details = {},
@@ -397,6 +411,39 @@ function M.kind_for_symbol(kinds, symbol, default_config)
     if symbol.kind ~= nil then return symbol.kind end
     -- We shouldn't ever get here, but somehow we do: https://github.com/oskarrrrrrr/symbols.nvim/issues/11
     return ""
+end
+
+local FALLBACK_PROVIDERS_PRIORITY = { "treesitter", "lsp" }
+
+---@param buf integer
+---@param priority_fun symbols.ProvidersPriorityFun
+---@param priority_tbl table<string, string[]>
+---@return string[]
+function M.resolve_providers_priority(buf, priority_fun, priority_tbl)
+    local filetype = vim.bo[buf].filetype
+
+    ---@type symbols.ProvidersPriorityFunInput
+    local input = {
+        filetype = filetype,
+        path = vim.api.nvim_buf_get_name(buf),
+    }
+    local ok, resultOrError = pcall(priority_fun, input)
+    if ok then
+        local result = resultOrError
+        if result ~= nil then return result end
+    else
+        local error = resultOrError
+        log.error("Error while running config.providers.priority_fun function: " .. error)
+    end
+
+    local result = priority_tbl[filetype]
+    if result ~= nil then return result end
+
+    local result = priority_tbl["*"]
+    if result ~= nil then return result end
+
+    -- shouldn't really get here
+    return FALLBACK_PROVIDERS_PRIORITY
 end
 
 return M

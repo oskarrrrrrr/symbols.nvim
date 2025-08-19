@@ -592,7 +592,6 @@ local function typescript_get_symbols(parser, buf)
 
             (method_definition)                @method
             (method_signature)                 @method
-            ;; (interface_body (method_signature) @method)
             (abstract_method_signature)        @method
 
         (interface_declaration) @interface

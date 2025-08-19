@@ -70,6 +70,7 @@ There are two sources of symbols that are displayed in the sidebar:
 Virtually any LSP server should work with the sidebar.
 
 Languages supported through treesitter (Treesitter parser name in brackets):
+- TypeScript (typescript)
 - Markdown (markdown)
 - Vimdoc (vimdoc)
 - Org (org)
@@ -77,8 +78,8 @@ Languages supported through treesitter (Treesitter parser name in brackets):
 - JSON Lines (json)
 - Makefile (make)
 
-When a language is supported by both sources, the LSP servers take precedence
-over Treesitter.
+When a language is supported by both sources, by default, the Treesitter
+provider takes precedence over the Language Server provider.
 
 # Tips
 
@@ -548,6 +549,20 @@ Default config below.
         },
     },
     providers = {
+        -- Order in which providers will be called to get symbols.
+        priority = {
+            -- Default in case other rules are not defined.
+            ["*"] = { "treesitter", "lsp" },
+            -- Treesitter provider for JSON can be slow for large files.
+            json = { "lsp", "treesitter" },
+        },
+        -- Override the priority using extra context.
+        -- Input has the following fields:
+        --  * filetype string
+        --  * path string - absolute path
+        --
+        -- Return `nil` to fall back to `priority` table.
+        priority_fun = function(input) return nil end,
         lsp = {
             timeout_ms = 1000,
             details = {},
