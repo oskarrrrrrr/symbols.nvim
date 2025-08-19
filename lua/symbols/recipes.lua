@@ -26,8 +26,8 @@ end
 ---@param symbol Symbol
 ---@return boolean
 local function javascript_filter(symbol)
-    -- local pkind = symbol.parent.kind
-    -- if (pkind == "Function" or pkind == "Method" or pkind == "Constructor") then return false end
+    local pkind = symbol.parent.kind
+    if (pkind == "Function" or pkind == "Method" or pkind == "Constructor") then return false end
     return true
 end
 
